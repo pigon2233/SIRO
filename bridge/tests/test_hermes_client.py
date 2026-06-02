@@ -11,6 +11,12 @@ from bridge.hermes_client import HermesClient, HermesResult
 
 
 class TestHermesClientResolveBinary:
+    def setup_method(self):
+        """確保測試間不互相干擾 env vars"""
+        import os
+        os.environ.pop("HERMES_BIN_PATH", None)
+        os.environ.pop("HERMES_BIN", None)
+
     def test_explicit_binary_path(self, tmp_path):
         """明確指定路徑時，應該直接用"""
         fake_bin = tmp_path / "fake_hermes"
@@ -114,3 +120,33 @@ class TestHermesClientChat:
         result = client.chat("hi")
         assert result.success is False
         assert "timeout" in (result.error or "").lower()
+
+
+class TestHermesOutputParser:
+    """測試 Hermes CLI 包裝格式 `{object : {text: "..."}}` 解析"""
+
+    def test_parses_wrapped_text(self):
+        raw = '{object : {text: "hello"}}'
+        assert HermesClient._parse_hermes_output(raw) == "hello"
+
+    def test_parses_wrapped_chinese(self):
+        raw = '{object : {text: "你好"}}'
+        assert HermesClient._parse_hermes_output(raw) == "你好"
+
+    def test_parses_wrapped_multiline(self):
+        raw = '{object : {text: "line1\nline2"}}'
+        assert "line1" in HermesClient._parse_hermes_output(raw)
+        assert "line2" in HermesClient._parse_hermes_output(raw)
+
+    def test_parses_no_space_around_colon(self):
+        raw = '{object:{text:"hi"}}'
+        assert HermesClient._parse_hermes_output(raw) == "hi"
+
+    def test_returns_raw_when_format_mismatch(self):
+        raw = "just plain text"
+        assert HermesClient._parse_hermes_output(raw) == "just plain text"
+
+    def test_returns_raw_when_only_partial_match(self):
+        raw = "{object: null}"
+        # 沒有 text field，不匹配，回傳原樣
+        assert HermesClient._parse_hermes_output(raw) == "{object: null}"

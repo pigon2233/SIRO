@@ -11,10 +11,21 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict
+
+# Windows console 預設 cp950 會解錯 hermes 的 UTF-8 輸出
+# 強制整個 process 用 UTF-8
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException

@@ -86,12 +86,37 @@ class HermesClient:
                 [self.binary_path, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
             )
             return result.returncode == 0
         except Exception as e:
             logger.warning(f"hermes 不可用: {type(e).__name__}: {e}")
             return False
+
+    @staticmethod
+    def _parse_hermes_output(raw: str) -> str:
+        """解析 hermes -z 輸出格式
+
+        Hermes CLI 包裝輸出為 `{object : {text: "..."}}` 結構，
+        抽出真正的文字內容。如果格式不符就回傳原始輸出。
+        """
+        import re
+        # 匹配 {object : {text: "..."}} 或類似變體
+        match = re.search(
+            r"\{\s*object\s*:\s*\{[^}]*text\s*:\s*(.+?)\}\s*\}",
+            raw,
+            re.DOTALL,
+        )
+        if match:
+            text = match.group(1).strip()
+            # 去掉可能的外層引號
+            if (text.startswith('"') and text.endswith('"')) or \
+               (text.startswith("'") and text.endswith("'")):
+                text = text[1:-1]
+            return text
+        return raw
 
     def get_version(self) -> Optional[str]:
         """取得 hermes 版本字串"""
@@ -122,8 +147,8 @@ class HermesClient:
         import time
 
         # 組指令：hermes -p "<message>"
-        # 注意：hermes -p 的精確介面待驗證（見 agent/notes/hermes_api_surface.md）
-        cmd = [self.binary_path, "-p", message] + self.extra_args
+        # 確認過的 hermes CLI 介面：-z 帶 prompt (不是 -p)
+        cmd = [self.binary_path, "-z", message] + self.extra_args
 
         env = os.environ.copy()
         if system_prompt:
@@ -138,6 +163,8 @@ class HermesClient:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.timeout,
                 env=env,
             )
@@ -154,9 +181,13 @@ class HermesClient:
                     duration_ms=duration_ms,
                 )
 
+            # 解析 Hermes CLI 包裝格式 `{object : {text: "..."}}`
+            raw_output = result.stdout.strip()
+            parsed_output = self._parse_hermes_output(raw_output)
+
             return HermesResult(
                 success=True,
-                output=result.stdout.strip(),
+                output=parsed_output,
                 error=None,
                 exit_code=0,
                 duration_ms=duration_ms,

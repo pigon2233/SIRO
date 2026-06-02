@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # agent/verify.sh - 驗證 Hermes Agent 已經正確安裝且能回應
 #
-# 這個腳本做四件事：
+# 這個腳本做五件事：
 #   1. 檢查 hermes CLI 存在
 #   2. 跑 hermes --version
 #   3. 跑 hermes doctor（如果存在）
 #   4. 跑一次 hermes -p（prompt 模式）問個簡單問題
+#   5. 檢查 .env 設定
 #
-# 如果全部通過，bridge/ 才能正常運作。
+# 找 hermes 的順序（覆蓋即可）：
+#   1. $HERMES_BIN 環境變數
+#   2. $HERMES_BIN_PATH 環境變數（與 bridge 共用）
+#   3. command -v hermes
+#   4. ~/.local/bin/hermes（官方 installer 預設）
+#   5. ~/hermes-agent/.venv/Scripts/hermes.exe 或 .../bin/hermes（clone + uv）
 
 set -uo pipefail
 
@@ -26,12 +32,18 @@ warn() { printf "${YELLOW}[WARN]${NC} %s\n" "$*"; }
 ERRORS=0
 
 # 找 hermes 二進位
-HERMES_BIN="${HERMES_BIN:-}"
+HERMES_BIN="${HERMES_BIN:-${HERMES_BIN_PATH:-}}"
 if [[ -z "$HERMES_BIN" ]]; then
     if command -v hermes >/dev/null 2>&1; then
         HERMES_BIN="$(command -v hermes)"
     elif [[ -x "$HOME/.local/bin/hermes" ]]; then
         HERMES_BIN="$HOME/.local/bin/hermes"
+    elif [[ -x "$HOME/hermes-agent/.venv/Scripts/hermes.exe" ]]; then
+        # Windows + uv venv
+        HERMES_BIN="$HOME/hermes-agent/.venv/Scripts/hermes.exe"
+    elif [[ -x "$HOME/hermes-agent/.venv/bin/hermes" ]]; then
+        # Linux + uv venv
+        HERMES_BIN="$HOME/hermes-agent/.venv/bin/hermes"
     fi
 fi
 
@@ -47,18 +59,21 @@ fi
 
 # 2. 跑 hermes --version
 info "Step 2: 檢查 hermes 版本"
-if [[ -n "$HERMES_BIN" ]]; then
-    if VERSION=$("$HERMES_BIN" --version 2>&1); then
+if [[ -n "$HERMES_BIN" && -x "$HERMES_BIN" ]]; then
+    # 用暫存檔避免 head 切管線造成 SIGPIPE
+    VERSION_OUTPUT=$("$HERMES_BIN" --version 2>&1 || true)
+    if [[ -n "$VERSION_OUTPUT" ]]; then
+        VERSION=$(echo "$VERSION_OUTPUT" | head -1)
         pass "版本: $VERSION"
     else
-        fail "hermes --version 執行失敗"
+        fail "hermes --version 執行失敗（沒輸出）"
         ERRORS=$((ERRORS+1))
     fi
 fi
 
 # 3. 跑 hermes doctor（如果支援）
 info "Step 3: 跑 hermes doctor（如果支援）"
-if [[ -n "$HERMES_BIN" ]]; then
+if [[ -n "$HERMES_BIN" && -x "$HERMES_BIN" ]]; then
     if "$HERMES_BIN" doctor --help >/dev/null 2>&1 || "$HERMES_BIN" help doctor >/dev/null 2>&1; then
         if "$HERMES_BIN" doctor 2>&1 | tail -20; then
             pass "doctor 跑完，看上面有沒有錯誤"
@@ -71,14 +86,15 @@ if [[ -n "$HERMES_BIN" ]]; then
 fi
 
 # 4. 測試 prompt（單次對話）
-info "Step 4: 測試單次對話 (hermes -p '請用一句話回應')"
-if [[ -n "$HERMES_BIN" ]]; then
-    echo "（這會呼叫 LLM API，可能花 5-30 秒）"
-    if "$HERMES_BIN" -p "請用一句話回應：測試成功" 2>&1 | head -5; then
+info "Step 4: 測試單次對話 (hermes -z '請用一句話回應')"
+if [[ -n "$HERMES_BIN" && -x "$HERMES_BIN" ]]; then
+    echo "（這會呼叫 LLM，可能花 5-30 秒）"
+    if "$HERMES_BIN" -z "請用一句話回應：測試成功" 2>&1 | head -5; then
         pass "對話測試有輸出"
     else
         fail "對話測試沒輸出（可能 API key 沒設或 LLM provider 沒設定）"
         echo "  請跑 'hermes setup' 設定 LLM provider"
+        echo "  或編輯 ~/.hermes/.env"
         ERRORS=$((ERRORS+1))
     fi
 fi

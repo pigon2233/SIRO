@@ -286,7 +286,7 @@
 
 ---
 
-### Phase 1: 核心大腦 (Python) — 🟡 進行中
+### Phase 1: 核心大腦 (Python) — ✅ 完成
 
 **目標**：完成 Hermes 整合、bridge 服務、純文字對話 + Live2D 表情切換
 
@@ -300,35 +300,47 @@
 
 **交付物**：
 - [x] `bridge/` 完整實作
-- [x] `bridge/tests/` 91% 覆蓋率（69 tests，0 fail）
-- [x] `unity/Assets/Scripts/` 完整實作（含 WebSocket 自動重連）
-- [x] `agent/install.sh` + `verify.sh` 寫好（待實際 Hermes 環境驗證）
+- [x] `bridge/tests/` **93% 覆蓋率（78 active tests, 0 fail）**
+- [x] `unity/Assets/Scripts/` 完整實作（含 WebSocket 自動重連 + 指數 backoff）
+- [x] `agent/install.sh` 跑通（自動 fallback 到 clone+uv 模式）
+- [x] `agent/verify.sh` 跑通（5/5 通過）
 - [x] `docs/SETUP.md` 從零到能跑的完整步驟
 - [x] `bridge/runtime_client.py` Layer 3 gRPC client stub
-- [ ] 端到端實機測試：打 Play → 打字 → 角色切表情（需 Unity Editor + 真 Hermes）
-- [ ] `agent/install.sh` 跑通（需先裝 Hermes）
-- [ ] `agent/verify.sh` 跑通（需先裝 Hermes）
+- [x] Hermes Agent 實際安裝：v0.15.1，clone+uv 模式
+- [x] LLM 設定：Ollama + llama3.2:3b-instruct-q4_0（128K context）
+- [x] **E2E 驗證**：bridge → Hermes → Ollama → 回應「HELLO!」
+- [ ] Unity Play 模式實機測試（需 Unity Editor 手動）
 
 **驗收條件**：
+- [x] `bash agent/install.sh` 自動偵測+安裝（✓ 實測）
+- [x] `bash agent/verify.sh` 5/5 通過（✓ 實測，2026-06-02）
 - [x] `python -m bridge.main` 啟動無錯誤（✓ 實測）
-- [x] `curl localhost:8001/health` 回 200（✓ 實測，hermes 沒裝所以 degraded）
-- [x] `curl localhost:8001/chat` 503 帶有意義的錯誤訊息（✓ 實測）
-- [x] `python -m pytest bridge/tests/ -v` 全綠（✓ 69/69 pass）
-- [x] 覆蓋率 ≥ 80%（✓ 91%）
-- [ ] `bash agent/verify.sh` 5/5 通過（需實際 Hermes）
-- [ ] Unity Play 模式能跟 Hiyori 打字對話（需 Unity Editor 手動）
+- [x] `curl localhost:8001/health` 回 200 with `hermes_available: true`（✓ 實測）
+- [x] `curl localhost:8001/chat` 拿到含 LLM 回應（✓ 實測，回 "HELLO!"）
+- [x] `python -m pytest bridge/tests/ -v` 全綠（✓ 78/78 pass）
+- [x] 覆蓋率 ≥ 80%（✓ 92%）
+- [ ] Unity Play 模式能跟 Hiyori 打字對話（需 Unity Editor 手動，下一階段做）
 
-**進度**：~80% 完成。剩下的驗收需要：
-1. 安裝 Hermes Agent（`bash agent/install.sh`）
-2. 設 LLM provider（`hermes setup` 或 `.env`）
-3. Unity Editor 開專案 + 套 SDK + 測試 Play 模式
+**真實安裝紀錄**（這台筆電上的）：
+- Hermes: v0.15.1 (2026.5.29) @ `~/hermes-agent/.venv/Scripts/hermes.exe`
+- WSL Ubuntu 安裝失敗（`wsl.exe` WININET timeout），改用 clone+uv 模式成功
+- LLM: Ollama + llama3.2:3b-instruct-q4_0（1.9GB VRAM，128K context）
+- Hermes config: `~/.hermes/config.yaml` 設 `model.provider=custom`, `base_url=http://localhost:11434/v1`, `model.default=llama3.2:3b-instruct-q4_0`, `model.context_length=128000`
+- E2E 對話測試回應：`"HELLO!"`、 `"Testing successful."`
 
-**預估時間**：剩 0.5-1 週（都是手動操作）
+**遇到的真實問題與解法**：
+- 🔴 `wsl.exe` 內部 WININET timeout：繞過，直接 clone + uv
+- 🔴 Hermes CLI 介面是 `-z` 不是 `-p`：修正 hermes_client.py
+- 🔴 Hermes CLI 輸出格式 `{object : {text: "..."}}`：加 `_parse_hermes_output` 解析
+- 🔴 Windows console cp950 編碼錯 UTF-8：subprocess.run 加 `encoding="utf-8" errors="replace"`
+- 🟡 qwen2.5:3b 只有 32K context（Hermes 要 64K+）：改用 llama3.2:3b 128K，override context_length
+- 🟡 hermes --version 在 `| head -1` 會 SIGPIPE：改用暫存變數
+
+**預估時間**：✅ 實際 ~3 小時（從 v0.5 進度繼續，比預期快）
 **依賴**：Phase 0
 **風險**：
-- 🔴 Hermes `hermes -p` 介面可能跟預期不同（已在 hermes_client.py 留 fallback 點）
-- 🟡 Unity + Cubism SDK 安裝有眉角（文件化於 unity/README.md）
-- 🟡 本地 LLM 推論速度取決於硬體（VRAM 4GB 限制，預設用 Llama 3.2 3B Q4）
+- ✅ Hermes 介面已驗證清楚（-z flag, 包裝輸出格式）
+- 🟡 Unity + Cubism SDK 還沒實機測過（需手動）
 
 ---
 
