@@ -26,58 +26,47 @@ namespace Siro.EditorTools
         [MenuItem("Tools/SIRO/Force Reimport Mao")]
         public static void ForceReimportMao()
         {
-            if (!Directory.Exists(MAO_PATH))
+            // 簡單做法：直接 ForceUpdate reimport Mao.moc3
+            // CubismAssetProcessor 會被 OnPostprocessAllAssets 觸發
+            // 自動重建 prefab / asset / expression list 並重新綁定紋理
+            string moc3Path = "Assets/Live2D/Cubism/Samples/Models/Mao/Mao.moc3";
+            string model3Path = "Assets/Live2D/Cubism/Samples/Models/Mao/Mao.model3.json";
+
+            Debug.Log("[Cubism Reimport] 強制 reimport Mao.moc3 跟 .model3.json ...");
+            Debug.Log("這會觸發 CubismAssetProcessor 重新跑 importer：");
+            Debug.Log("  - 重建 Mao.prefab");
+            Debug.Log("  - 重建 Mao.asset");
+            Debug.Log("  - 重建所有 expression list / motion list");
+            Debug.Log("  - 重新綁定材質的 _MainTex 紋理");
+
+            if (File.Exists(moc3Path))
             {
-                Debug.LogError($"找不到 {MAO_PATH}");
-                return;
+                AssetDatabase.ImportAsset(moc3Path, ImportAssetOptions.ForceUpdate);
+            }
+            else
+            {
+                Debug.LogError($"找不到 {moc3Path}");
             }
 
-            Debug.Log("[Cubism Reimport] 開始強制 reimport Mao...");
-
-            // 刪除所有 .meta + importer 產生的 asset (prefab, asset, expression list 等)
-            // 留原始檔 (.moc3, .model3.json, .2048, .png, .cdi3.json, .pose3.json, .physics3.json, .motion3.json)
-            string[] toKeep = {
-                ".moc3", ".model3.json", ".motion3.json", ".exp3.json",
-                ".pose3.json", ".physics3.json", ".cdi3.json",
-                ".png", ".2048"  // .2048 是目錄
-            };
-
-            var dir = new DirectoryInfo(MAO_PATH);
-            int deleted = 0;
-            foreach (var file in dir.GetFiles("*", SearchOption.AllDirectories))
+            if (File.Exists(model3Path))
             {
-                if (file.Extension == ".meta") continue;
-                bool shouldKeep = false;
-                foreach (var ext in toKeep)
-                {
-                    if (ext == ".2048") // 是目錄
-                    {
-                        if (file.Directory?.Name == "Mao.2048") { shouldKeep = true; break; }
-                    }
-                    else if (file.Name.EndsWith(ext, System.StringComparison.OrdinalIgnoreCase))
-                    {
-                        shouldKeep = true; break;
-                    }
-                }
+                AssetDatabase.ImportAsset(model3Path, ImportAssetOptions.ForceUpdate);
+            }
 
-                if (!shouldKeep)
+            // 也 reimport motions 跟 expressions 子資料夾
+            string[] subdirs = { "motions", "expressions" };
+            foreach (var sub in subdirs)
+            {
+                string subPath = $"Assets/Live2D/Cubism/Samples/Models/Mao/{sub}";
+                if (Directory.Exists(subPath))
                 {
-                    Debug.Log($"[Cubism Reimport] 刪除: {file.FullName}");
-                    AssetDatabase.DeleteAsset(file.FullName.Replace(Application.dataPath, "Assets").Replace('\\', '/'));
-                    deleted++;
+                    AssetDatabase.ImportAsset(subPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ImportRecursive);
                 }
             }
 
-            // 也刪掉 .meta 檔
-            foreach (var meta in dir.GetFiles("*.meta", SearchOption.AllDirectories))
-            {
-                AssetDatabase.DeleteAsset(meta.FullName.Replace(Application.dataPath, "Assets").Replace('\\', '/'));
-            }
+            AssetDatabase.Refresh();
 
-            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-
-            Debug.Log($"[Cubism Reimport] 刪了 {deleted} 個檔 + 全部 .meta");
-            Debug.Log("[Cubism Reimport] 接下來 Unity 會自動 reimport 觸發 CubismAssetProcessor");
+            Debug.Log("[Cubism Reimport] 完成了。檢查 Mao.prefab 跟材質 _MainTex 是否有 texture");
         }
 
         [MenuItem("Tools/SIRO/Force Reimport All Cubism Models")]
