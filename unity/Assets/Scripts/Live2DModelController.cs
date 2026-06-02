@@ -111,18 +111,20 @@ namespace Siro
             }
 
             // 找到對應的 CubismExpressionData
-            // 用 foreach 而不是 indexed access（SDK 5-r.5 的 CubismExpressionList 沒 Count / indexer）
-            var expressions = _expressionController.ExpressionsList;
+            // SDK 5-r.5 的 CubismExpressionList 是一個 ScriptableObject，
+            // 真正存資料的是 .CubismExpressionObjects 這個 array。
+            var expressions = _expressionController.ExpressionsList?.CubismExpressionObjects;
             int targetIndex = -1;
-            int currentIdx = 0;
-            foreach (var expressionData in expressions)
+            if (expressions != null)
             {
-                if (expressionData != null && expressionData.name == expressionId)
+                for (int i = 0; i < expressions.Length; i++)
                 {
-                    targetIndex = currentIdx;
-                    break;
+                    if (expressions[i] != null && expressions[i].name == expressionId)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
                 }
-                currentIdx++;
             }
 
             if (targetIndex < 0)
