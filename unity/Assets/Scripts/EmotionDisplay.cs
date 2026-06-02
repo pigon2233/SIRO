@@ -15,8 +15,7 @@ namespace Siro
         public HermesBridgeClient bridgeClient;
 
         [Header("Emotion → Expression Mapping")]
-        [Tooltip("預設值對應 Hiyori 的 expression 檔名 (F01-F06)")]
-        public string expressionHappy = "F02";
+        [Tooltip("預設值對應 Mao (Cubism SDK Samples) 的 expression 檔名 (exp_01-exp_08)")]
         public string expressionHappy = "exp_02";
         public string expressionSad = "exp_04";
         public string expressionAngry = "exp_03";
