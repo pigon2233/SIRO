@@ -36,7 +36,10 @@ runtime/
 
 # ============ Unity ============
 # Unity 自動產生的暫存/設定檔（不要 commit，整包靠 Unity Editor 重新生成）
+# 注意：[Uu]nity/ pattern 會誤吃我們的 unity/ 原始碼資料夾，所以加白名單
 [Uu]nity/
+!/unity/
+!/unity/**
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
