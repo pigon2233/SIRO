@@ -64,8 +64,13 @@ namespace Siro.EditorTools
 
                 if (!noMeshHere)
                 {
-                    minPos = Vector3.Min(minPos, mf.bounds.min);
-                    maxPos = Vector3.Max(maxPos, mf.bounds.max);
+                    // MeshFilter 沒 bounds 屬性，要從 Renderer 拿 world-space bounds
+                    var rendForBounds = go.GetComponent<Renderer>();
+                    if (rendForBounds != null)
+                    {
+                        minPos = Vector3.Min(minPos, rendForBounds.bounds.min);
+                        maxPos = Vector3.Max(maxPos, rendForBounds.bounds.max);
+                    }
                 }
 
                 string status = "OK";
