@@ -24,6 +24,7 @@ using UnityEngine.EventSystems;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using TMPro;
+using System.IO;
 
 namespace Siro.EditorTools
 {
@@ -34,6 +35,56 @@ namespace Siro.EditorTools
         [MenuItem(MENU_PATH)]
         public static void BuildChatUI()
         {
+            // 0. 檢查 TMP Essential Resources 是否有裝
+            // 沒裝的話 TMP 沒字型，UI 會 NullRef
+            if (!HasTMPEssentialResources())
+            {
+                bool import = EditorUtility.DisplayDialog(
+                    "TMP Essential Resources 沒裝",
+                    "SIRO UI 需要 TextMeshPro Essential Resources（含預設字型）。\n\n" +
+                    "是否現在自動 import？\n\n" +
+                    "（會下載字型到 Assets/TextMesh Pro/）",
+                    "Import",
+                    "取消"
+                );
+                if (import)
+                {
+                    // 從 PackageCache 找 TMP Essential Resources
+                    string packageCache = Path.Combine(Application.dataPath, "..", "Library", "PackageCache");
+                    string[] dirs = System.IO.Directory.GetDirectories(
+                        packageCache, "com.unity.ugui@*", System.IO.SearchOption.TopDirectoryOnly);
+                    if (dirs.Length > 0)
+                    {
+                        string essentials = Path.Combine(
+                            dirs[0], "Runtime", "TMP Essential Resources.unitypackage");
+                        if (System.IO.File.Exists(essentials))
+                        {
+                            AssetDatabase.ImportPackage(essentials, false);
+                            Debug.Log("[SIRO UI Builder] 已 import TMP Essential Resources");
+                        }
+                        else
+                        {
+                            Debug.LogError(
+                                "[SIRO UI Builder] 找不到 TMP Essential Resources，" +
+                                "請手動 Window > TextMeshPro > Import TMP Essential Resources");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError(
+                            "[SIRO UI Builder] 找不到 com.unity.ugui package cache");
+                        return;
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        "[SIRO UI Builder] ⚠ 沒裝 TMP Essential Resources，" +
+                        "建出來的 UI 會 NullRef");
+                }
+            }
+
             // 1. 找或建 Canvas
             Canvas canvas = GameObject.FindObjectOfType<Canvas>();
             if (canvas == null)
@@ -105,6 +156,12 @@ namespace Siro.EditorTools
         }
 
         // ==================== Helper ====================
+
+        private static bool HasTMPEssentialResources()
+        {
+            // 看 Assets/TextMesh Pro/ 資料夾存不存在（TMP Essential Resources 解壓後會建這個）
+            return AssetDatabase.IsValidFolder("Assets/TextMesh Pro");
+        }
 
         private static GameObject FindOrCreateChild(Transform parent, string name)
         {
