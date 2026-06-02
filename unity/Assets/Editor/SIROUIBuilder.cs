@@ -89,16 +89,16 @@ namespace Siro.EditorTools
             Canvas canvas = GameObject.FindObjectOfType<Canvas>();
             if (canvas == null)
             {
-                GameObject canvasGO = new GameObject("Canvas",
-                    typeof(Canvas),
-                    typeof(CanvasScaler),
-                    typeof(GraphicRaycaster));
-                canvas = canvasGO.GetComponent<Canvas>();
+                // 不用建構子加 component（曾發生 CanvasScaler 沒加上的 bug）
+                // 一個一個 AddComponent 最可靠
+                GameObject canvasGO = new GameObject("Canvas");
+                canvas = canvasGO.AddComponent<Canvas>();
                 canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                var scaler = canvasGO.GetComponent<CanvasScaler>();
+                CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
                 scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
                 scaler.referenceResolution = new Vector2(1920, 1080);
                 scaler.matchWidthOrHeight = 0.5f;
+                canvasGO.AddComponent<GraphicRaycaster>();
                 Undo.RegisterCreatedObjectUndo(canvasGO, "Create SIRO Canvas");
             }
 
