@@ -39,6 +39,21 @@
 3. 下載最新版的 `CubismSdkForUnity-*.unitypackage`
 4. 雙擊 .unitypackage → Import All
 
+### 1.5 啟用 `SIRO_HAS_CUBISM` define
+
+`Live2DModelController.cs` 用 `#if SIRO_HAS_CUBISM` 包住所有 Cubism SDK 引用，
+這樣沒裝 SDK 時也能編譯（Unity 不會卡在 safe mode）。
+
+裝完 SDK 後，要啟用實際功能：
+
+1. `Edit > Project Settings > Player`
+2. 展開 `Other Settings`
+3. 找到 `Scripting Define Symbols`
+4. 加 `SIRO_HAS_CUBISM`
+5. 重新 import
+
+完成後 `Live2DModelController` 才會真的控制 Cubism 模型。
+
 ### 2. 下載 Hiyori 模型
 
 從 [Live2D 官方範例下載](https://www.live2d.com/en/download/sample-data/) 抓 Hiyori，

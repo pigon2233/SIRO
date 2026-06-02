@@ -4,33 +4,45 @@
 // - 切換 expression (F01-F06 對 Hiyori)
 // - 播放 motion (Idle, FlickHead, TapBody...)
 //
-// 使用：
-//   - 掛在 Live2D 模型的 GameObject 上（會自動抓 CubismModel 與 components）
-//   - 從 EmotionDisplay 呼叫 SetExpression(expressionId)
+// 重要：此腳本依賴 Cubism SDK for Unity。
+// 沒裝 SDK 時，所有 Cubism 相關程式碼會被 #if guard 跳過，
+// Unity 仍能正常編譯開啟專案（只是功能不會作用）。
+//
+// 裝完 SDK 後，到 Unity → Project Settings → Player → Other Settings
+// → Scripting Define Symbols 加 `SIRO_HAS_CUBISM` 才能啟用完整功能。
 //
 
-using System.Collections;
-using System.Collections.Generic;
+using UnityEngine;
+
+// 這兩個 namespace 在裝 Cubism SDK 後才存在。
+// 用 #if guard 避免沒裝 SDK 時編譯錯誤。
+#if SIRO_HAS_CUBISM
+using Live2D.Cubism.Core;
 using Live2D.Cubism.Framework.Expression;
 using Live2D.Cubism.Framework.Motion;
-using UnityEngine;
+#endif
 
 namespace Siro
 {
+#if SIRO_HAS_CUBISM
     [RequireComponent(typeof(CubismModel))]
+#endif
     public class Live2DModelController : MonoBehaviour
     {
         [Header("Debug")]
         public bool verboseLogging = true;
 
+#if SIRO_HAS_CUBISM
         private CubismModel _model;
         private CubismExpressionController _expressionController;
         private CubismMotionController _motionController;
+#endif
 
         // 暫存目前的 expression 名稱，避免重複觸發
         private string _currentExpressionId = "";
         private Coroutine _blendCoroutine;
 
+#if SIRO_HAS_CUBISM
         private void Awake()
         {
             _model = GetComponent<CubismModel>();
@@ -54,6 +66,21 @@ namespace Siro
                 );
             }
         }
+#else
+        // 沒 SDK 時的占位 Awake，用來 log 提醒
+        private void Awake()
+        {
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    "[Live2DModelController] SIRO_HAS_CUBISM 未啟用，" +
+                    "請到 Project Settings → Player → Other Settings → " +
+                    "Scripting Define Symbols 加 `SIRO_HAS_CUBISM` " +
+                    "（並先安裝 Cubism SDK for Unity）"
+                );
+            }
+        }
+#endif
 
         // ==================== 公開 API ====================
 
@@ -64,6 +91,7 @@ namespace Siro
         /// <param name="blendDuration">過渡時間（秒），預設 0.5s 平滑切換</param>
         public void SetExpression(string expressionId, float blendDuration = 0.5f)
         {
+#if SIRO_HAS_CUBISM
             if (_expressionController == null)
             {
                 if (verboseLogging) Debug.LogWarning("[Live2DModelController] 無 expression controller");
@@ -104,11 +132,20 @@ namespace Siro
             }
 
             // 觸發 expression
-            if (blendCoroutine != null) StopCoroutine(_blendCoroutine);
+            if (_blendCoroutine != null) StopCoroutine(_blendCoroutine);
             _blendCoroutine = StartCoroutine(BlendExpressionRoutine(targetIndex, blendDuration));
 
             _currentExpressionId = expressionId;
             if (verboseLogging) Debug.Log($"[Live2DModelController] 切到 expression: {expressionId}");
+#else
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[Live2DModelController] SetExpression({expressionId}) 被忽略，" +
+                    "因為 SIRO_HAS_CUBISM 未啟用"
+                );
+            }
+#endif
         }
 
         /// <summary>
@@ -119,6 +156,7 @@ namespace Siro
         /// <param name="priority">優先級，預設 2 (CubismMotionPriority 標準)</param>
         public void PlayMotion(string group, int index = 0, int priority = 2)
         {
+#if SIRO_HAS_CUBISM
             if (_motionController == null)
             {
                 if (verboseLogging) Debug.LogWarning("[Live2DModelController] 無 motion controller");
@@ -131,8 +169,6 @@ namespace Siro
             var animator = GetComponent<Animator>();
             if (animator != null)
             {
-                // 假設 motion 群組對應 Animator 的 trigger
-                // 這部分要看實際 Hiyori 模型的 Animator 怎麼設
                 Debug.Log($"[Live2DModelController] 想播 motion: {group}[{index}]，" +
                           "需要確認 Animator 設定");
             }
@@ -143,11 +179,21 @@ namespace Siro
                     $"想播 motion {group}[{index}] 但無法觸發"
                 );
             }
+#else
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[Live2DModelController] PlayMotion({group}) 被忽略，" +
+                    "因為 SIRO_HAS_CUBISM 未啟用"
+                );
+            }
+#endif
         }
 
         // ==================== 內部 ====================
 
-        private IEnumerator BlendExpressionRoutine(int targetIndex, float duration)
+#if SIRO_HAS_CUBISM
+        private System.Collections.IEnumerator BlendExpressionRoutine(int targetIndex, float duration)
         {
             // 簡單的過渡：直接觸發 expression（Cubism Expression Controller 內部會 blend）
             if (duration <= 0)
@@ -163,5 +209,6 @@ namespace Siro
                 yield return new WaitForSeconds(duration);
             }
         }
+#endif
     }
 }
