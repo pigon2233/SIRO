@@ -111,15 +111,18 @@ namespace Siro
             }
 
             // 找到對應的 CubismExpressionData
+            // 用 foreach 而不是 indexed access（SDK 5-r.5 的 CubismExpressionList 沒 Count / indexer）
             var expressions = _expressionController.ExpressionsList;
             int targetIndex = -1;
-            for (int i = 0; i < expressions?.Count; i++)
+            int currentIdx = 0;
+            foreach (var expressionData in expressions)
             {
-                if (expressions[i]?.name == expressionId)
+                if (expressionData != null && expressionData.name == expressionId)
                 {
-                    targetIndex = i;
+                    targetIndex = currentIdx;
                     break;
                 }
+                currentIdx++;
             }
 
             if (targetIndex < 0)
