@@ -245,7 +245,8 @@ namespace Siro.EditorTools
             StretchToParent(go.GetComponent<RectTransform>());
             StretchToParent(labelGO.GetComponent<RectTransform>());
 
-            return go.GetComponent<Button>();
+            // BUG 修正：之前寫 go.GetComponent<Button>() 但從來沒加過 Button，永遠回 null
+            return go.AddComponent<Button>();
         }
 
         private static TMP_Text EnsureTMPText(GameObject go, int fontSize)
