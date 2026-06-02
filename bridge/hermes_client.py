@@ -50,15 +50,17 @@ class HermesClient:
         self.extra_args = extra_args or []
 
     def _resolve_binary(self, override: Optional[str]) -> str:
-        """決定實際要跑的 hermes 指令"""
+        """決定實際要跑的 hermes 指令
+
+        注意：這個方法只決定「用哪個路徑」，不驗證存在。
+        驗證存在由 is_available() 處理，這樣可以延後到使用時才檢查。
+        """
         if override:
-            if not Path(override).exists():
-                raise FileNotFoundError(f"指定的 hermes binary 不存在: {override}")
             return override
 
         # 1. 看環境變數
         env_path = os.environ.get("HERMES_BIN_PATH")
-        if env_path and Path(env_path).expanduser().exists():
+        if env_path:
             return str(Path(env_path).expanduser())
 
         # 2. 看 PATH
@@ -71,12 +73,14 @@ class HermesClient:
         if default.exists():
             return str(default)
 
-        # 找不到時回傳 'hermes'，後面執行會失敗
-        logger.warning("找不到 hermes 指令，請確認有跑過 agent/install.sh")
+        # 找不到時回傳 'hermes'，後面執行會失敗並回報
         return "hermes"
 
     def is_available(self) -> bool:
-        """檢查 hermes CLI 是否可用"""
+        """檢查 hermes CLI 是否可用
+
+        任何例外都視為「不可用」，不應該 propagate 出去。
+        """
         try:
             result = subprocess.run(
                 [self.binary_path, "--version"],
@@ -85,8 +89,8 @@ class HermesClient:
                 timeout=10,
             )
             return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-            logger.warning(f"hermes 不可用: {e}")
+        except Exception as e:
+            logger.warning(f"hermes 不可用: {type(e).__name__}: {e}")
             return False
 
     def get_version(self) -> Optional[str]:

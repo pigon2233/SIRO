@@ -2,6 +2,8 @@
 bridge/tests/test_hermes_client.py
 """
 
+import subprocess
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -16,10 +18,26 @@ class TestHermesClientResolveBinary:
         client = HermesClient(binary_path=str(fake_bin))
         assert client.binary_path == str(fake_bin)
 
-    def test_missing_explicit_binary_raises(self):
-        """明確指定不存在的路徑時，應該 raise"""
-        with pytest.raises(FileNotFoundError):
-            HermesClient(binary_path="/nonexistent/hermes")
+    def test_explicit_path_can_be_nonexistent(self):
+        """明確指定不存在路徑時，build 不 raise（is_available 會回報）"""
+        client = HermesClient(binary_path="/nonexistent/hermes")
+        assert client.binary_path == "/nonexistent/hermes"
+
+    def test_falls_back_to_env_var(self, monkeypatch, tmp_path):
+        """環境變數 HERMES_BIN_PATH 設定時優先用"""
+        fake_bin = tmp_path / "env_hermes"
+        fake_bin.write_text("#!/bin/sh\n")
+        monkeypatch.setenv("HERMES_BIN_PATH", str(fake_bin))
+        client = HermesClient()
+        assert client.binary_path == str(fake_bin)
+
+    def test_falls_back_to_which(self, monkeypatch, tmp_path):
+        """PATH 上找得到時用 which"""
+        fake_bin = tmp_path / "hermes"
+        fake_bin.write_text("#!/bin/sh\n")
+        monkeypatch.setattr("shutil.which", lambda x: str(fake_bin) if x == "hermes" else None)
+        client = HermesClient()
+        assert client.binary_path == str(fake_bin)
 
     def test_falls_back_to_default_path(self, monkeypatch, tmp_path):
         """PATH 上找不到時，fallback 到 ~/.local/bin/hermes"""
@@ -30,6 +48,13 @@ class TestHermesClientResolveBinary:
         default.write_text("#!/bin/sh\n")
         client = HermesClient()
         assert client.binary_path == str(default)
+
+    def test_fallback_to_hermes_string(self, monkeypatch, tmp_path):
+        """都找不到時，回傳 'hermes' 字串（執行會失敗但 build 不 raise）"""
+        monkeypatch.setattr("shutil.which", lambda x: None)
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        client = HermesClient()
+        assert client.binary_path == "hermes"
 
 
 class TestHermesClientIsAvailable:
@@ -89,6 +114,3 @@ class TestHermesClientChat:
         result = client.chat("hi")
         assert result.success is False
         assert "timeout" in (result.error or "").lower()
-
-
-import subprocess  # 確保 import

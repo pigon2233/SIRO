@@ -485,7 +485,7 @@ h1 .headerlink:hover, h2 .headerlink:hover, h3 .headerlink:hover { color: #3b82f
         <div class="doc-section" id="top">
             <div class="doc-title">
                 <h2>SIRO 文件總覽</h2>
-                <p class="doc-meta">產出時間：2026-06-02 16:36 · 31 個文件 · 6 個 Phase</p>
+                <p class="doc-meta">產出時間：2026-06-02 17:14 · 31 個文件 · 6 個 Phase</p>
             </div>
             <p>這是 SIRO 專案的完整文件集。所有 Markdown 來源檔案在 <code>SIRO/</code> 專案根目錄下，本檔由 <code>scripts/build-docs-html.py</code> 自動產生。</p>
 
@@ -1405,34 +1405,43 @@ AI 本身就是 OS 的 shell，不是「在 OS 上跑 AI 應用」。</p>
 <strong>依賴</strong>：無<br />
 <strong>風險</strong>：低</p>
 <hr />
-<h3 id="phase-1-python">Phase 1: 核心大腦 (Python)</h3>
+<h3 id="phase-1-python">Phase 1: 核心大腦 (Python) — 🟡 進行中</h3>
 <p><strong>目標</strong>：完成 Hermes 整合、bridge 服務、純文字對話 + Live2D 表情切換</p>
 <p><strong>範圍</strong>：<br />
 - Python bridge 服務<br />
 - Hermes CLI 整合（subprocess）<br />
 - 情緒解析<br />
-- Unity 文字輸入 + 表情切換<br />
-- 本地 LLM（Ollama + GPU）</p>
+- Unity 文字輸入 + 表情切換（+ 自動重連）<br />
+- 本地 LLM（Ollama + GPU）<br />
+- gRPC client stub（為 Phase 3 鋪路）</p>
 <p><strong>交付物</strong>：<br />
-- [ ] <code>bridge/</code> 完整實作<br />
-- [ ] <code>bridge/tests/</code> 80% 覆蓋率<br />
-- [ ] <code>unity/Assets/Scripts/</code> 完整實作<br />
-- [ ] <code>agent/install.sh</code> 跑通<br />
-- [ ] <code>agent/verify.sh</code> 跑通<br />
-- [ ] 端到端測試：打 Play → 打字 → 角色切表情<br />
-- [ ] <code>docs/SETUP.md</code> 從零到能跑的完整步驟</p>
+- [x] <code>bridge/</code> 完整實作<br />
+- [x] <code>bridge/tests/</code> 91% 覆蓋率（69 tests，0 fail）<br />
+- [x] <code>unity/Assets/Scripts/</code> 完整實作（含 WebSocket 自動重連）<br />
+- [x] <code>agent/install.sh</code> + <code>verify.sh</code> 寫好（待實際 Hermes 環境驗證）<br />
+- [x] <code>docs/SETUP.md</code> 從零到能跑的完整步驟<br />
+- [x] <code>bridge/runtime_client.py</code> Layer 3 gRPC client stub<br />
+- [ ] 端到端實機測試：打 Play → 打字 → 角色切表情（需 Unity Editor + 真 Hermes）<br />
+- [ ] <code>agent/install.sh</code> 跑通（需先裝 Hermes）<br />
+- [ ] <code>agent/verify.sh</code> 跑通（需先裝 Hermes）</p>
 <p><strong>驗收條件</strong>：<br />
-- [ ] <code>bash agent/verify.sh</code> 5/5 通過<br />
-- [ ] <code>python -m bridge.main</code> 啟動無錯誤<br />
-- [ ] <code>curl localhost:8001/chat</code> 拿到含情緒的回應<br />
-- [ ] <code>python -m pytest bridge/tests/ -v</code> 全綠<br />
-- [ ] Unity Play 模式能跟 Hiyori 打字對話</p>
-<p><strong>預估時間</strong>：2-3 週<br />
+- [x] <code>python -m bridge.main</code> 啟動無錯誤（✓ 實測）<br />
+- [x] <code>curl localhost:8001/health</code> 回 200（✓ 實測，hermes 沒裝所以 degraded）<br />
+- [x] <code>curl localhost:8001/chat</code> 503 帶有意義的錯誤訊息（✓ 實測）<br />
+- [x] <code>python -m pytest bridge/tests/ -v</code> 全綠（✓ 69/69 pass）<br />
+- [x] 覆蓋率 ≥ 80%（✓ 91%）<br />
+- [ ] <code>bash agent/verify.sh</code> 5/5 通過（需實際 Hermes）<br />
+- [ ] Unity Play 模式能跟 Hiyori 打字對話（需 Unity Editor 手動）</p>
+<p><strong>進度</strong>：~80% 完成。剩下的驗收需要：<br />
+1. 安裝 Hermes Agent（<code>bash agent/install.sh</code>）<br />
+2. 設 LLM provider（<code>hermes setup</code> 或 <code>.env</code>）<br />
+3. Unity Editor 開專案 + 套 SDK + 測試 Play 模式</p>
+<p><strong>預估時間</strong>：剩 0.5-1 週（都是手動操作）<br />
 <strong>依賴</strong>：Phase 0<br />
 <strong>風險</strong>：<br />
-- 🔴 Hermes <code>hermes -p</code> 介面可能跟預期不同（已預留 fallback）<br />
-- 🟡 Unity + Cubism SDK 安裝有眉角（文件化）<br />
-- 🟡 本地 LLM 推論速度取決於硬體（先測過再決定模型大小）</p>
+- 🔴 Hermes <code>hermes -p</code> 介面可能跟預期不同（已在 hermes_client.py 留 fallback 點）<br />
+- 🟡 Unity + Cubism SDK 安裝有眉角（文件化於 unity/README.md）<br />
+- 🟡 本地 LLM 推論速度取決於硬體（VRAM 4GB 限制，預設用 Llama 3.2 3B Q4）</p>
 <hr />
 <h3 id="phase-2-unity-live2d">Phase 2: 視覺呈現強化 (Unity + Live2D)</h3>
 <p><strong>目標</strong>：完善 Live2D 互動體驗，加上視覺效果</p>
@@ -7353,8 +7362,12 @@ uvicorn<span class="w"> </span>bridge.main:app<span class="w"> </span>--reload<s
 <td>Pydantic schemas</td>
 </tr>
 <tr>
+<td><code>runtime_client.py</code></td>
+<td>Layer 3 (siro-runtime) gRPC client stub</td>
+</tr>
+<tr>
 <td><code>tests/</code></td>
-<td>單元測試</td>
+<td>單元測試（69 個案例，91% 覆蓋率）</td>
 </tr>
 </tbody>
 </table>

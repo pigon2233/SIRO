@@ -286,7 +286,7 @@
 
 ---
 
-### Phase 1: 核心大腦 (Python)
+### Phase 1: 核心大腦 (Python) — 🟡 進行中
 
 **目標**：完成 Hermes 整合、bridge 服務、純文字對話 + Live2D 表情切換
 
@@ -294,31 +294,41 @@
 - Python bridge 服務
 - Hermes CLI 整合（subprocess）
 - 情緒解析
-- Unity 文字輸入 + 表情切換
+- Unity 文字輸入 + 表情切換（+ 自動重連）
 - 本地 LLM（Ollama + GPU）
+- gRPC client stub（為 Phase 3 鋪路）
 
 **交付物**：
-- [ ] `bridge/` 完整實作
-- [ ] `bridge/tests/` 80% 覆蓋率
-- [ ] `unity/Assets/Scripts/` 完整實作
-- [ ] `agent/install.sh` 跑通
-- [ ] `agent/verify.sh` 跑通
-- [ ] 端到端測試：打 Play → 打字 → 角色切表情
-- [ ] `docs/SETUP.md` 從零到能跑的完整步驟
+- [x] `bridge/` 完整實作
+- [x] `bridge/tests/` 91% 覆蓋率（69 tests，0 fail）
+- [x] `unity/Assets/Scripts/` 完整實作（含 WebSocket 自動重連）
+- [x] `agent/install.sh` + `verify.sh` 寫好（待實際 Hermes 環境驗證）
+- [x] `docs/SETUP.md` 從零到能跑的完整步驟
+- [x] `bridge/runtime_client.py` Layer 3 gRPC client stub
+- [ ] 端到端實機測試：打 Play → 打字 → 角色切表情（需 Unity Editor + 真 Hermes）
+- [ ] `agent/install.sh` 跑通（需先裝 Hermes）
+- [ ] `agent/verify.sh` 跑通（需先裝 Hermes）
 
 **驗收條件**：
-- [ ] `bash agent/verify.sh` 5/5 通過
-- [ ] `python -m bridge.main` 啟動無錯誤
-- [ ] `curl localhost:8001/chat` 拿到含情緒的回應
-- [ ] `python -m pytest bridge/tests/ -v` 全綠
-- [ ] Unity Play 模式能跟 Hiyori 打字對話
+- [x] `python -m bridge.main` 啟動無錯誤（✓ 實測）
+- [x] `curl localhost:8001/health` 回 200（✓ 實測，hermes 沒裝所以 degraded）
+- [x] `curl localhost:8001/chat` 503 帶有意義的錯誤訊息（✓ 實測）
+- [x] `python -m pytest bridge/tests/ -v` 全綠（✓ 69/69 pass）
+- [x] 覆蓋率 ≥ 80%（✓ 91%）
+- [ ] `bash agent/verify.sh` 5/5 通過（需實際 Hermes）
+- [ ] Unity Play 模式能跟 Hiyori 打字對話（需 Unity Editor 手動）
 
-**預估時間**：2-3 週
+**進度**：~80% 完成。剩下的驗收需要：
+1. 安裝 Hermes Agent（`bash agent/install.sh`）
+2. 設 LLM provider（`hermes setup` 或 `.env`）
+3. Unity Editor 開專案 + 套 SDK + 測試 Play 模式
+
+**預估時間**：剩 0.5-1 週（都是手動操作）
 **依賴**：Phase 0
 **風險**：
-- 🔴 Hermes `hermes -p` 介面可能跟預期不同（已預留 fallback）
-- 🟡 Unity + Cubism SDK 安裝有眉角（文件化）
-- 🟡 本地 LLM 推論速度取決於硬體（先測過再決定模型大小）
+- 🔴 Hermes `hermes -p` 介面可能跟預期不同（已在 hermes_client.py 留 fallback 點）
+- 🟡 Unity + Cubism SDK 安裝有眉角（文件化於 unity/README.md）
+- 🟡 本地 LLM 推論速度取決於硬體（VRAM 4GB 限制，預設用 Llama 3.2 3B Q4）
 
 ---
 

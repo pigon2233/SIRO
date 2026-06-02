@@ -36,7 +36,8 @@ uvicorn bridge.main:app --reload --host 127.0.0.1 --port 8001
 | `emotion_mapping.json` | 情緒 → Live2D (Hiyori) 動作映射 |
 | `prompts.py` | 系統提示詞（讓 Hermes 帶標籤輸出） |
 | `models.py` | Pydantic schemas |
-| `tests/` | 單元測試 |
+| `runtime_client.py` | Layer 3 (siro-runtime) gRPC client stub |
+| `tests/` | 單元測試（69 個案例，91% 覆蓋率） |
 
 ---
 
