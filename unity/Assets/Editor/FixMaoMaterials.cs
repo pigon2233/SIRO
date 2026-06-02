@@ -41,8 +41,10 @@ namespace Siro.EditorTools
             Dictionary<string, string> blendModes = ParseCdi3(CDI3_PATH);
             Debug.Log($"✓ cdi3.json 解析完成: {blendModes.Count} 個 ArtMesh");
 
-            // 3. 載入四種 UnlitBlendMode 材質
-            Material normalMat = LoadMaterial("Assets/Live2D/Cubism/Rendering/Resources/Live2D/Cubism/Materials/BlendMode/UnlitBlendModeNormal.mat");
+            // 3. 載入 UnlitBlendMode 材質
+            // SDK 5-r.5 沒有單純的 UnlitBlendModeNormal.mat，標準 normal alpha
+            // blending 是 UnlitBlendModeNormalConjoint.mat
+            Material normalMat = LoadMaterial("Assets/Live2D/Cubism/Rendering/Resources/Live2D/Cubism/Materials/BlendMode/UnlitBlendModeNormalConjoint.mat");
             Material addMat = LoadMaterial("Assets/Live2D/Cubism/Rendering/Resources/Live2D/Cubism/Materials/BlendMode/UnlitBlendModeAdd.mat");
             Material multiplyMat = LoadMaterial("Assets/Live2D/Cubism/Rendering/Resources/Live2D/Cubism/Materials/BlendMode/UnlitBlendModeMultiply.mat");
 
