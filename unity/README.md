@@ -34,10 +34,15 @@
 
 ### 1. 安裝 Cubism SDK for Unity
 
-1. 到 [Live2D Cubism SDK 下載頁](https://www.live2d.com/en/sdk/download/cubism-sdk-for-unity/)
-2. 註冊/登入 Live2D 帳號
-3. 下載最新版的 `CubismSdkForUnity-*.unitypackage`
-4. 雙擊 .unitypackage → Import All
+1. 到 [Live2D Cubism SDK 下載頁](https://www.live2d.com/sdk/download/unity/)
+   - 舊的 `live2d.com/en/sdk/download/cubism-sdk-for-unity/` 已 404
+2. 註冊/登入 Live2D 帳號（必要）
+3. 同意授權條款
+4. 下載最新版的 `CubismSdkForUnity-*.unitypackage`
+5. 雙擊 .unitypackage → Import All
+
+> GitHub 上 [Live2D/CubismUnityComponents](https://github.com/Live2D/CubismUnityComponents)
+> 只有 source code，**沒有** `.unitypackage`。.unitypackage 只能從官網拿。
 
 ### 1.5 啟用 `SIRO_HAS_CUBISM` define
 
@@ -56,8 +61,11 @@
 
 ### 2. 下載 Hiyori 模型
 
-從 [Live2D 官方範例下載](https://www.live2d.com/en/download/sample-data/) 抓 Hiyori，
+從 [Live2D 官方範例下載](https://www.live2d.com/sdk/sample-data/) 抓 Hiyori，
 解壓後整包丟進 `unity/Assets/Models/Hiyori/`。
+
+> 如果上面網址 404，試試搜尋 "Live2D Hiyori sample data" 找 mirror，
+> 或從 [CubismSamples](https://github.com/Live2D/CubismSamples) GitHub repo 下載。
 
 ### 3. 建立 MainScene
 
