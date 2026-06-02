@@ -17,12 +17,13 @@ namespace Siro
         [Header("Emotion → Expression Mapping")]
         [Tooltip("預設值對應 Hiyori 的 expression 檔名 (F01-F06)")]
         public string expressionHappy = "F02";
-        public string expressionSad = "F04";
-        public string expressionAngry = "F03";
-        public string expressionSurprised = "F05";
-        public string expressionThinking = "F01";
-        public string expressionExcited = "F02";
-        public string expressionNeutral = "F01";
+        public string expressionHappy = "exp_02";
+        public string expressionSad = "exp_04";
+        public string expressionAngry = "exp_03";
+        public string expressionSurprised = "exp_08";
+        public string expressionThinking = "exp_01";
+        public string expressionExcited = "exp_05";
+        public string expressionNeutral = "exp_01";
 
         [Header("Debug")]
         public bool verboseLogging = true;

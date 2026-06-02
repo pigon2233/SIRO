@@ -59,18 +59,33 @@
 
 完成後 `Live2DModelController` 才會真的控制 Cubism 模型。
 
-### 2. 下載 Hiyori 模型
+### 2. 取得 Live2D 模型
 
-從 [Live2D 官方範例下載](https://www.live2d.com/sdk/sample-data/) 抓 Hiyori，
-解壓後整包丟進 `unity/Assets/Models/Hiyori/`。
+#### 選項 A：用 SDK 內建範例（推薦，省事）
 
-> 如果上面網址 404，試試搜尋 "Live2D Hiyori sample data" 找 mirror，
-> 或從 [CubismSamples](https://github.com/Live2D/CubismSamples) GitHub repo 下載。
+Cubism SDK 已經內建 6 個 model 在 `Assets/Live2D/Cubism/Samples/Models/`，**每個都已經有 .prefab 可以直接拖**：
+
+- `Clipping/Clipping.prefab`
+- `Koharu/Koharu.prefab`
+- `Mao/Mao.prefab` ← 推薦（有 8 個 expression，最豐富）
+- `Natori/Natori.prefab`
+- `Ren/Ren.prefab`
+- `Rice/Rice.prefab`
+
+直接把 `Mao.prefab`（或任一個）拖到場景即可。
+
+#### 選項 B：自己下載 Hiyori
+
+從 [Live2D 官方範例下載](https://www.live2d.com/sdk/sample-data/) 抓 Hiyori。
+**注意**：Hiyori 下載不完整時只會有 motion 跟 texture 檔，沒有主模型 `.moc3` 跟 `.prefab`（這就是我們之前撞到的問題）。
+如果下載完整，應該會看到 `Hiyori.moc3` + `Hiyori.prefab` 兩個檔。
+
+> 完整下載網址不穩定。如果上面網址 404，試搜 "Live2D Hiyori sample data" 找 mirror。
 
 ### 3. 建立 MainScene
 
 1. `File > New Scene` → 存成 `Assets/Scenes/MainScene.unity`
-2. 把 Hiyori 拖進場景
+2. 把 model 拖進場景（建議用 Mao.prefab）
 3. 建立 UI Canvas：
    - `GameObject > UI > Canvas`
    - 加 `InputField`（或 `TMP_InputField`）
@@ -80,10 +95,14 @@
    - Add Component → `HermesBridgeClient` (Siro namespace)
 5. 設定 Inspector：
    - `Bridge > HermesBridgeClient`：`serverUrl` = `ws://127.0.0.1:8001/ws`
-   - `Hiyori` GameObject → Add Component → `Live2DModelController`
-   - `Hiyori` GameObject → Add Component → `EmotionDisplay`，把 `Bridge` 拖到 `bridgeClient` 欄位
+   - model GameObject → Add Component → `Live2DModelController`
+   - model GameObject → Add Component → `EmotionDisplay`，把 `Bridge` 拖到 `bridgeClient` 欄位
    - `Canvas > ChatInputUI` (Add Component)，把 UI 元素拖進欄位
 6. 存場景
+
+> **表情 ID 對應**：如果用 Mao，表情檔名是 `exp_01` ~ `exp_08`。
+> `EmotionDisplay` 預設值已經是 Mao 的命名，可以直接用。
+> 如果用 Hiyori，預設值是 F01-F06，**記得改回**（在 Inspector 改）。
 
 ### 4. 驗證
 
