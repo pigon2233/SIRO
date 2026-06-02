@@ -1,0 +1,114 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ============ Environment & Secrets ============
+.env
+.env.local
+.env.*.local
+!.env.example
+*.key
+*.pem
+
+# ============ Logs & Runtime Data ============
+logs/
+*.log
+*.pid
+*.sock
+data/
+runtime/
+.cache/
+
+# ============ Unity ============
+# Unity 自動產生的暫存/設定檔（不要 commit，整包靠 Unity Editor 重新生成）
+[Uu]nity/
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# Unity 產生的 IDE/工具檔
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Builds
+*.apk
+*.aab
+*.ipa
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.mdb
+*.x86_64
+*.x86
+*.dsym
+
+# Asset meta data (only for folders, not the asset itself)
+sysinfo.txt
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Live2D 模型（不要 commit 進 git，自己從 Live2D 官網下載）
+# unity/Assets/Models/**/*.moc3
+# unity/Assets/Models/**/*.model3.json
+# unity/Assets/Models/**/textures/*.png
+# 如果想留模型就拿掉這幾行，但要注意授權
+unity/Assets/StreamingAssets/
+
+# ============ OS ============
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ============ IDE ============
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/launch-templates.json
+
+# ============ Misc ============
+*.swp
+*.swo
+*~
+*.bak
+*.orig

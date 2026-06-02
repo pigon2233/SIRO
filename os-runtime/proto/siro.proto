@@ -1,0 +1,214 @@
+// os-runtime/proto/siro.proto
+//
+// SIRO Runtime gRPC 介面定義。
+// 這個檔案由 Layer 2 (Python bridge) 跟 Layer 3 (Rust runtime) 共用。
+// 改完要重新生成程式碼：
+//   Python: python -m grpc_tools.protoc -I proto --python_out=bridge/grpc_client/generated --grpc_python_out=bridge/grpc_client/generated proto/siro.proto
+//   Rust:   在 Cargo.toml 加上 tonic-build
+
+syntax = "proto3";
+
+package siro.runtime.v1;
+
+// ============================================================
+// 服務定義
+// ============================================================
+
+service SiroRuntime {
+  // 查詢所有服務狀態
+  rpc GetStatus(Empty) returns (SystemStatus);
+
+  // 查詢硬體資訊
+  rpc GetHardwareInfo(Empty) returns (HardwareInfo);
+
+  // 重啟指定服務
+  rpc RestartService(ServiceName) returns (Ack);
+
+  // 啟動 / 停止服務
+  rpc ControlService(ServiceControl) returns (Ack);
+
+  // 切換 kiosk 模式
+  rpc SetKioskMode(KioskRequest) returns (Ack);
+
+  // 健康檢查
+  rpc Health(Empty) returns (HealthStatus);
+
+  // 串流 log
+  rpc StreamLogs(LogFilter) returns (stream LogEntry);
+
+  // 訂閱系統事件
+  rpc SubscribeEvents(EventFilter) returns (stream SystemEvent);
+}
+
+// ============================================================
+// 共用訊息
+// ============================================================
+
+message Empty {}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+// ============================================================
+// 服務管理
+// ============================================================
+
+message ServiceName {
+  string name = 1;  // "bridge", "hermes", "unity", "runtime"
+}
+
+message ServiceControl {
+  string name = 1;
+  ServiceAction action = 2;
+
+  enum ServiceAction {
+    UNKNOWN = 0;
+    START = 1;
+    STOP = 2;
+    RESTART = 3;
+  }
+}
+
+message ServiceState {
+  string name = 1;
+  ServiceStatus status = 2;
+  int32 pid = 3;
+  int64 uptime_seconds = 4;
+  int64 memory_bytes = 5;
+  float cpu_percent = 6;
+  string last_error = 7;
+
+  enum ServiceStatus {
+    UNKNOWN = 0;
+    RUNNING = 1;
+    STOPPED = 2;
+    FAILED = 3;
+    STARTING = 4;
+    STOPPING = 5;
+  }
+}
+
+message SystemStatus {
+  map<string, ServiceState> services = 1;
+  SystemMetrics metrics = 2;
+}
+
+message SystemMetrics {
+  int64 uptime_seconds = 1;
+  int64 total_memory_bytes = 2;
+  int64 used_memory_bytes = 3;
+  float cpu_load_1min = 4;
+  float cpu_load_5min = 5;
+  float cpu_load_15min = 6;
+}
+
+// ============================================================
+// 硬體資訊
+// ============================================================
+
+message HardwareInfo {
+  CpuInfo cpu = 1;
+  MemoryInfo memory = 2;
+  GpuInfo gpu = 3;
+  repeated AudioDevice audio = 4;
+  DisplayInfo display = 5;
+  repeated CameraDevice cameras = 6;
+}
+
+message CpuInfo {
+  string model = 1;
+  int32 cores = 2;
+  int32 threads = 3;
+  float frequency_ghz = 4;
+}
+
+message MemoryInfo {
+  int64 total_bytes = 1;
+  int64 available_bytes = 2;
+}
+
+message GpuInfo {
+  string model = 1;
+  string vendor = 2;
+  int64 vram_bytes = 3;
+  string driver_version = 4;
+  string cuda_version = 5;  // NVIDIA only
+  float utilization_percent = 6;
+  float temperature_c = 7;
+}
+
+message AudioDevice {
+  string name = 1;
+  string device_type = 2;  // "input" / "output"
+  bool is_default = 3;
+}
+
+message DisplayInfo {
+  string server = 1;  // "x11" / "wayland" / "none"
+  int32 width = 2;
+  int32 height = 3;
+  float refresh_rate = 4;
+}
+
+message CameraDevice {
+  string device_path = 1;  // /dev/video0
+  string name = 2;
+  int32 width = 3;
+  int32 height = 4;
+  int32 fps = 5;
+}
+
+// ============================================================
+// Kiosk 模式
+// ============================================================
+
+message KioskRequest {
+  bool enable = 1;
+  string escape_password = 2;  // 可選，重新設定 escape 密碼
+}
+
+// ============================================================
+// 健康檢查
+// ============================================================
+
+message HealthStatus {
+  bool healthy = 1;
+  string version = 2;
+  int64 uptime_seconds = 3;
+  repeated string issues = 4;
+}
+
+// ============================================================
+// Log 串流
+// ============================================================
+
+message LogFilter {
+  // 過濾條件（可選）
+  string service = 1;       // 只看某個 service
+  string min_level = 2;     // "debug" / "info" / "warn" / "error"
+  string pattern = 3;       // 關鍵字
+}
+
+message LogEntry {
+  string service = 1;
+  string level = 2;
+  string message = 3;
+  int64 timestamp_ms = 4;
+}
+
+// ============================================================
+// 事件訂閱
+// ============================================================
+
+message EventFilter {
+  // 訂閱的事件類型（可選）
+  repeated string event_types = 1;
+}
+
+message SystemEvent {
+  string event_type = 1;  // "service.started", "service.failed", "kiosk.enabled", ...
+  int64 timestamp_ms = 2;
+  map<string, string> data = 3;
+}

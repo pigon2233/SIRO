@@ -1,0 +1,19 @@
+[package]
+name = "siro-ctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+description = "SIRO control CLI - manage siro-runtime and services"
+
+[[bin]]
+name = "siro-ctl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

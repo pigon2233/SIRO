@@ -1,0 +1,15 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+
+# 編譯產物
+*.o
+*.so
+*.dylib
+*.dll
