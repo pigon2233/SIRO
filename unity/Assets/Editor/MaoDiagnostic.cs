@@ -82,8 +82,22 @@ namespace Siro.EditorTools
                 if (rend != null)
                 {
                     var mat = rend.sharedMaterial;
+                    string colorStr = "n/a";
+                    if (mat != null)
+                    {
+                        // 不是每個 shader 都有 _Color，用 HasProperty 檢查
+                        if (mat.HasProperty("_Color"))
+                        {
+                            try { colorStr = mat.color.ToString(); }
+                            catch { colorStr = "(error reading)"; }
+                        }
+                        else
+                        {
+                            colorStr = "(no _Color)";
+                        }
+                    }
                     sb.AppendLine($"    Material: {(mat != null ? mat.name : "NULL")}, " +
-                                  $"enabled={rend.enabled}, color={(mat != null ? mat.color : "n/a")}");
+                                  $"enabled={rend.enabled}, color={colorStr}");
                     if (mat != null && mat.HasProperty("_MainTex"))
                     {
                         var tex = mat.GetTexture("_MainTex");
