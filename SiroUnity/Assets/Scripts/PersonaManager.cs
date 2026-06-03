@@ -98,7 +98,9 @@ namespace Siro
             }
             else if (verboseLogging)
             {
-                Debug.LogWarning($"[PersonaManager] persona '{config.id}' 沒指定 prefab_path，沿用場景內的 character");
+                // 這是正常的 siro-default 情況：Mao 已經在場景內，不用 prefab 載入
+                // 改 Log（不是 LogWarning）— 這是預期行為、不是錯
+                Debug.Log($"[PersonaManager] persona '{config.id}' 沒指定 prefab_path，沿用場景內的 character");
             }
 
             // 2. 套 quirks 到 Live2DModelController
