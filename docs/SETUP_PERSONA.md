@@ -28,13 +28,16 @@
 4. **選單 → Tools → SIRO → Setup Persona Manager**
    - 自動建好 `SIROPersonaRoot` GameObject（含所有 component）
    - 自動接到現有的 HermesBridgeClient + Live2DModelController
-   - 自動加右上角「角色:SIRO」按鈕 + dropdown
+   - 自動加右上角**齒輪 icon 按鈕**（用 `Assets/picture/gear.png` 當 sprite）
    - 場景自動儲存
 5. **進 Play 模式測試**
    - 應該看到 SIRO 的 Mao
-   - 右上角看到「角色:SIRO」按鈕
+   - 右上角看到齒輪 icon
    - 點下去 → dropdown 展開
    - 選不同 persona（如果有的話）
+
+> **換 icon**：把 Sprite 放進 `Assets/`，然後改 [PersonaSceneSetup.cs:166](SiroUnity/Assets/Editor/PersonaSceneSetup.cs) 的 `AssetDatabase.LoadAssetAtPath<Sprite>(...)` 路徑。
+> 想加文字標籤：在 Hierarchy 展開 `PersonaSettingsButton` → 啟用 `Label` GameObject。
 
 ### 移除
 

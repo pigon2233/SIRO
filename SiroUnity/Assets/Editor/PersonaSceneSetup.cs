@@ -113,10 +113,11 @@ namespace Siro.EditorTools
                 "✓ 完成！\n\n" +
                 "下次進 Play 模式時：\n" +
                 "1. 自動套用 siro-default（Mao 顯示 SIRO 表情）\n" +
-                "2. 右上角看到小齒輪「⚙ SIRO」\n" +
+                "2. 右上角看到齒輪 icon（picture/gear.png）\n" +
                 "3. 點齒輪 → dropdown 展開 → 選角色\n" +
                 "4. 選完自動收合\n\n" +
-                "想換預設角色：在 SIROPersonaRoot 改 defaultPersonaId。",
+                "想換預設角色：在 SIROPersonaRoot 改 defaultPersonaId。\n" +
+                "想用其他 icon：把 Sprite 放進 Assets/ 然後改這 script 載入。",
                 "OK");
         }
 
@@ -148,7 +149,7 @@ namespace Siro.EditorTools
                 eventSystemGo.AddComponent<StandaloneInputModule>();
             }
 
-            // 齒輪按鈕（右上角）
+            // 齒輪按鈕（右上角）— 用 picture/gear.png 當 icon
             var settingsGo = new GameObject(SETTINGS_BTN_NAME, typeof(RectTransform), typeof(Image), typeof(Button));
             settingsGo.transform.SetParent(canvas.transform, false);
             var settingsRect = settingsGo.GetComponent<RectTransform>();
@@ -156,11 +157,25 @@ namespace Siro.EditorTools
             settingsRect.anchorMax = new Vector2(1, 1);
             settingsRect.pivot = new Vector2(1, 1);
             settingsRect.anchoredPosition = new Vector2(-20, -20);  // 右上角內縮
-            settingsRect.sizeDelta = new Vector2(140, 40);
+            settingsRect.sizeDelta = new Vector2(60, 60);  // 正方形 icon 尺寸
 
+            // 載入 picture/gear.png Sprite（meta 已改成 Sprite mode）
+            var gearSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/picture/gear.png");
             var settingsBtnImage = settingsGo.GetComponent<Image>();
-            settingsBtnImage.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
+            if (gearSprite != null)
+            {
+                settingsBtnImage.sprite = gearSprite;
+                settingsBtnImage.color = Color.white;  // 保持原色
+            }
+            else
+            {
+                // 找不到 sprite 就 fallback 灰底
+                Debug.LogWarning("[PersonaSceneSetup] 找不到 Assets/picture/gear.png Sprite，按鈕用灰底 fallback");
+                settingsBtnImage.color = new Color(0.2f, 0.2f, 0.2f, 0.7f);
+            }
 
+            // 隱藏 label（icon-only 按鈕）— PersonaSelectorUI 還是可以用 settingsButtonLabel
+            // 但預設不顯示文字，只顯示 icon
             var settingsLabelGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
             settingsLabelGo.transform.SetParent(settingsGo.transform, false);
             var labelRect = settingsLabelGo.GetComponent<RectTransform>();
@@ -173,6 +188,9 @@ namespace Siro.EditorTools
             label.alignment = TextAlignmentOptions.Center;
             label.fontSize = 16;
             label.color = Color.white;
+            // 預設隱藏 label（icon 已經說明一切）
+            // 想看「角色:SIRO」文字時：Inspector 取消勾 Label.enabled
+            settingsLabelGo.SetActive(false);
 
             // Dropdown（預設隱藏）
             var dropdownGo = new GameObject(DROPDOWN_NAME, typeof(RectTransform), typeof(Image), typeof(TMP_Dropdown));
