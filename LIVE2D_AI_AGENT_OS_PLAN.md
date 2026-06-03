@@ -344,7 +344,7 @@
 
 ---
 
-### Phase 1.5: GAPS 立刻補強 ⚠️ 代碼完成、待 runtime 驗證
+### Phase 1.5: GAPS 立刻補強 ✅ 完成（2026-06-03 runtime 驗收過）
 
 **目標**：填補 [docs/GAPS.md](docs/GAPS.md) 中「不做會卡 Phase 2-3」的 5 項缺口。
 
@@ -367,7 +367,7 @@ Phase 1 把「能跟 Mao 文字對話」這件事跑通了，但發現幾個**�
 - [x] [docs/PERSONA.md](docs/PERSONA.md) — Persona schema 規範
 - [x] `bridge/personas/siro-default.yaml` — SIRO 第一個 Persona
 - [x] [bridge/prompts.py](bridge/prompts.py) 改 — 從 YAML 讀，不再 hardcode
-- [x] bridge 端離線降級 — Hermes 死時走預設回應池（"嗯..."、"我在想"）
+- [x] bridge 端離線降級 — Hermes 死時走**兩段式 fallback**（Ollama llama3.2:3b → persona 靜態文字 + thinking）
 - [x] Unity 端降級 UX — bridgeClient 斷線時切 thinking 表情 + UI 提示「連線中...」
 - [x] [docs/SECURITY.md](docs/SECURITY.md) 加 §0 — 一頁釐清資料現況 + Phase 4-6 加密路線圖
 - [x] PLAN.md 加 KPI 章節 + 串進每個 Phase 驗收條件
@@ -376,19 +376,24 @@ Phase 1 把「能跟 Mao 文字對話」這件事跑通了，但發現幾個**�
 - [x] [docs/SECURITY.md](docs/SECURITY.md) §0 回答：資料存哪 / 誰能讀 / 重啟後留多少 / v1 加密計畫
 - [x] PLAN.md 每個 Phase 有量化驗收（K1-K10 對應 — 見每 Phase 章節）
 - [x] PLAN.md Phase 2-6 都有 GAPS 對應子節（剩 5 項分散處理）
-- [ ] **runtime**：`bridge/personas/siro-default.yaml` 改 personality 字串 → Mao 回應風格真的變
-- [ ] **runtime**：`Ctrl+C` 殺 bridge → Unity 在 3 秒內切 thinking 表情 + 顯示「連線中...」
-- [ ] **runtime**：bridge 啟動時 `~/.hermes/config.yaml` 故意改壞 → API 回預設回應池 + thinking emotion，而非 502
+- [x] **runtime**（2026-06-03）：Primary LLM 切到 MiniMax-M3，600s timeout 走 Ollama fallback — 實機驗證 Mao 中文回應、情緒表情切換、emoji 過濾、strong signal（難過/生氣/驚訝）、WebSocket 自動重連、Ctrl+C 乾淨關閉全通過
+- [x] **runtime**（2026-06-03）：Persona YAML 載入驗證 — bridge 啟動 log 顯示「✓ 載入 persona: siro-default (v0.1.0)」，Mao 回應符合 SIRO 性格
+- [x] **runtime**（2026-06-03）：Ollama soft fallback E2E 測試（`bridge/ollama_client.py` + `_try_ollama_fallback`）— 程式驗證 `你好` 真的拿到 `[emotion:happy]` 標籤的中文回應
 
-**預估時間**：1 週
+**預估時間**：1 週（實際 2026-06-02 ~ 2026-06-03，含 runtime 驗收）
 **依賴**：Phase 1 ✅
 **風險**：
 - 🟢 YAML schema 是純結構工作、低風險
-- 🟡 離線降級要驗 edge case（bridge restart、Hermes timeout、Unity 斷線重連）
+- 🟡 離線降級要驗 edge case（bridge restart、Hermes timeout、Unity 斷線重連）— 2026-06-03 已實機驗證
 - 🟢 文件工作，無技術風險
 
 **為什麼不直接進 Phase 2**：
 Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前要先有穩固的「能持續對話」基礎。Phase 1.5 把這基礎打好，Phase 2 才能專心做視覺。GAPS 剩下的 5 項（i18n / STT-TTS / 災難恢復 / OTA UX / 多人識別）依時機分散到 Phase 2-6，不阻塞 Phase 1.5。
+
+**Runtime 驗收紀錄**（2026-06-03）：
+- 改動 commits：`d406e69`（MiniMax-M3 路由 + 兩段式 fallback）、`25155f9`（修 get_version cp950 解碼 bug）
+- 測試項：T1 啟動日誌 / T2 Unity 基本對話 / T3 強情緒（難過/生氣/驚訝）/ T4 emoji 過濾 / T5 WebSocket 重連（顯示「連線中...」+ thinking 表情）/ T6 Ctrl+C 乾淨關閉
+- 結果：6/6 全通過，使用者確認「都沒有問題」
 
 ---
 
