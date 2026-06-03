@@ -353,3 +353,46 @@ public int[] eyeDrawableIndices = { 87, 92 };
 9. **找眼球用 Drawable Inspector 的 Isolate 按鈕** — 比 Hide 直觀（看到剩下什麼就是這個 mesh 的形狀）
 10. **Cubism Drawable 屬性別動 (Opacity 等)** — runtime 想藏 mesh 用 Unity 原生 `MeshRenderer.enabled`，不會被 Cubism LateUpdate 蓋過
 
+## Phase 11：v0.2 視覺強化 — 待機動作
+
+### 目標
+
+Mao 在「沒在講話」的時間看起來**活著** — 加 idle motion loop（呼吸）。
+
+### 為什麼之前 Mao 死板
+
+Cubism Animator (`Mao.controller`) 的 m_DefaultState 是空，沒有 motion 設定。`DisableMaoAnimator` 工具又把 Animator 整個關掉，給 `CubismMotionController` 接管 — 但 MotionController 本身沒主動播任何 .anim 檔，結果 Mao 就一動也不動。
+
+### 修法（v0.2+）
+
+`Live2DModelController` 加兩個欄位：
+- `AnimationClip idleMotion` — 待機 motion（Mao 預設拖入 mtn_01.anim）
+- `bool autoPlayIdle` — Start 自動 loop 播放（預設 true）
+
+`PlayMotion(AnimationClip, isLoop, fadeInSeconds, priority)` 重載 — 真的呼叫 Cubism SDK 的 `PlayAnimation()`，舊的 `PlayMotion(string, int)` 改為 stub 留 log 警告。
+
+### 場景接線（一次性手動）
+
+1. Unity Editor 開 Mao prefab
+2. 點 Live2DModelController
+3. Inspector 找 **Idle Motion** 欄位
+4. 拖入 `Assets/Live2D/Cubism/Samples/Models/Mao/motions/mtn_01.anim`（5.57s 呼吸 loop）
+5. 儲存 prefab
+6. 進 Play 模式 → Mao 應該呼吸
+
+### 沒看到動？
+
+檢查清單：
+- [ ] Cubism SDK 5-r.5 + `SIRO_HAS_CUBISM` define 有設
+- [ ] `Mao.controller` 還是 disable（`Tools/SIRO/Disable Mao Animator` 跑過）
+- [ ] Mao prefab 上 Live2DModelController 的 `idleMotion` 欄位不是 null
+- [ ] Console 沒 `motion controller 是 null` 警告
+
+### v0.2 後續視覺強化 roadmap
+
+- 表情平滑過渡（用 Cubism Expression Blend）
+- 點擊 Mao 觸發 motion（tap head / tap body）
+- i18n zh-TW.json 抽 UI 字串
+- Loading 狀態視覺細化
+- 視覺設定檔（亮度、縮放）進 persona YAML
+

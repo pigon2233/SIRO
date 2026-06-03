@@ -13,6 +13,7 @@
 //
 
 using UnityEngine;
+using System;  // v0.2+ PlayMotion 用 try/catch
 
 // 這兩個 namespace 在裝 Cubism SDK 後才存在。
 // 用 #if guard 避免沒裝 SDK 時編譯錯誤。
@@ -31,6 +32,14 @@ namespace Siro
     {
         [Header("Debug")]
         public bool verboseLogging = true;
+
+        [Header("Idle Motion (v0.2 待機動作)")]
+        [Tooltip("待機動作。Start() 自動 loop 播放。" +
+                 "Mao 預設拖入 mtn_01.anim（5.57s 呼吸 loop）。\n" +
+                 "v0.2+ 可由 persona YAML 的 idle_motions 覆寫（待 v1 擴充）。")]
+        public AnimationClip idleMotion;
+        [Tooltip("Start 自動播放 idle")]
+        public bool autoPlayIdle = true;
 
         [Header("Eye-Hiding Hack (workaround for Mao 閉眼設計不完整)")]
         [Tooltip("切到下列 expression 時，會把 eyeDrawableIndices 指到的 Drawable MeshRenderer 隱藏，" +
@@ -171,6 +180,12 @@ namespace Siro
 
             // Cubism Drawable 在 Awake 之後才完全 ready，所以 cache 放這
             CacheEyeRenderers();
+
+            // v0.2+：Start 自動播放 idle motion（loop）
+            if (autoPlayIdle && idleMotion != null)
+            {
+                PlayMotion(idleMotion, isLoop: true, fadeInSeconds: 1.0f);
+            }
         }
 #else
         // 沒 SDK 時的占位 Awake，用來 log 提醒
@@ -287,44 +302,86 @@ namespace Siro
         }
 
         /// <summary>
-        /// 播放指定 motion 群組的某個 motion。
+        /// 播放指定 motion 群組的某個 motion（向後相容舊 API，會 log 警告沒實作）。
+        /// v0.2+：請用 PlayMotion(AnimationClip) 重載。
         /// </summary>
-        /// <param name="group">motion 群組名，如 "Idle", "TapBody"</param>
-        /// <param name="index">群組內的 motion index，預設 0</param>
-        /// <param name="priority">優先級，預設 2 (CubismMotionPriority 標準)</param>
         public void PlayMotion(string group, int index = 0, int priority = 2)
+        {
+            // v0.2+：舊 string-based API 留為 stub — Cubism 5 SDK 用 AnimationClip
+            // 不再用 group+index。新 API 是 PlayMotion(AnimationClip, isLoop, fadeInSeconds)
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[Live2DModelController] PlayMotion(group='{group}', index={index}) 是舊 API，請改用 PlayMotion(AnimationClip) 重載"
+                );
+            }
+        }
+
+        /// <summary>
+        /// v0.2+：直接播 AnimationClip。給 Mao 待機用 mtn_01.anim、tap body 用 mtn_03 之類。
+        /// </summary>
+        /// <param name="clip">要播的 .anim（AnimationClip）。null 就停掉所有 motion。</param>
+        /// <param name="isLoop">是否 loop。idle 用 true、tap 用 false。</param>
+        /// <param name="fadeInSeconds">淡入時間（避免突然切換）。預設 1s。</param>
+        /// <param name="priority">Cubism priority，預設 Normal (=2)。Idle 設 IdlePriority (=1) 容易被 tap 打斷。</param>
+        public void PlayMotion(AnimationClip clip, bool isLoop = true, float fadeInSeconds = 1.0f, int priority = 2)
         {
 #if SIRO_HAS_CUBISM
             if (_motionController == null)
             {
-                if (verboseLogging) Debug.LogWarning("[Live2DModelController] 無 motion controller");
+                if (verboseLogging) Debug.LogWarning("[Live2DModelController] 無 motion controller，無法播 motion");
                 return;
             }
 
-            if (string.IsNullOrEmpty(group)) return;
-
-            // Cubism SDK 內建 Animator 觸發
-            var animator = GetComponent<Animator>();
-            if (animator != null)
+            if (clip == null)
             {
-                Debug.Log($"[Live2DModelController] 想播 motion: {group}[{index}]，" +
-                          "需要確認 Animator 設定");
+                if (verboseLogging) Debug.Log("[Live2DModelController] PlayMotion(null) — 忽略（沒指定 clip）");
+                return;
             }
-            else
+
+            try
             {
-                if (verboseLogging) Debug.Log(
-                    $"[Live2DModelController] 無 Animator，" +
-                    $"想播 motion {group}[{index}] 但無法觸發"
+                // Cubism 5 SDK 5-r.5 API
+                _motionController.PlayAnimation(
+                    clip,
+                    layerIndex: 0,
+                    priority: priority,
+                    isLoop: isLoop,
+                    speed: 1.0f
                 );
+                if (verboseLogging) Debug.Log(
+                    $"[Live2DModelController] PlayMotion: {clip.name} (loop={isLoop}, fade={fadeInSeconds}s)"
+                );
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Live2DModelController] PlayMotion 失敗: {e.Message}");
             }
 #else
             if (verboseLogging)
             {
                 Debug.LogWarning(
-                    $"[Live2DModelController] PlayMotion({group}) 被忽略，" +
-                    "因為 SIRO_HAS_CUBISM 未啟用"
+                    $"[Live2DModelController] PlayMotion({clip.name}) 被忽略，SIRO_HAS_CUBISM 未啟用"
                 );
             }
+#endif
+        }
+
+        /// <summary>
+        /// 停止目前播放的 motion（會 fade out）
+        /// </summary>
+        public void StopMotion(float fadeOutSeconds = 1.0f)
+        {
+#if SIRO_HAS_CUBISM
+            if (_motionController == null) return;
+            try
+            {
+                // Cubism 5 沒有直接的 StopMotion，傳 null clip 會清掉
+                _motionController.PlayAnimation(null);
+            }
+            catch { /* 忽略 — 沒在播就沒事 */ }
+#else
+            // 沒 SDK 就 no-op
 #endif
         }
 
