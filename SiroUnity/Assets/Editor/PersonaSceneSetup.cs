@@ -215,6 +215,17 @@ namespace Siro.EditorTools
             EditorSceneManager.SaveOpenScenes();
             Debug.Log("[PersonaSceneSetup] 已移除 persona UI");
         }
+
+        /// <summary>
+        /// 重建：移除舊的 SIROPersonaRoot + UI，再跑一次 Setup
+        /// 給「script 改了想用新版本」用的快速重置
+        /// </summary>
+        [MenuItem("Tools/SIRO/Reset & Re-setup Persona Manager")]
+        public static void ResetAndSetup()
+        {
+            Remove();
+            Setup();
+        }
     }
 }
 #endif
