@@ -158,7 +158,16 @@ async def lifespan(app: FastAPI):
 
     # 初始化情緒解析器
     state.parser = EmotionParser()
-    logger.info("✓ 情緒解析器就緒")
+
+    # v1.1：預先 warm up jieba — 第一次 chat 不會被 jieba 字典載入（~1.5s）拖慢
+    # 用一個假訊號跑一次 parse() 把 jieba + add_word 暖開
+    import time
+    t_jieba = time.time()
+    try:
+        _, _, _ = state.parser.parse("暖機測試 hello world", user_input="暖機")
+        logger.info(f"✓ 情緒解析器就緒（jieba 暖機 { (time.time()-t_jieba)*1000:.0f}ms）")
+    except Exception as e:
+        logger.warning(f"✓ 情緒解析器就緒（jieba 暖機失敗: {e}）")
 
     # v0.2+：印出已註冊的路由（除錯用）
     routes = sorted({f"{r.methods} {r.path}" if hasattr(r, 'methods') else f"  {r.path}"
