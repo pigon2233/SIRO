@@ -1,0 +1,14 @@
+{
+    "ui.input.placeholder": "輸入訊息...",
+    "ui.connect.waiting": "（等待連線...）",
+    "ui.connect.disconnected": "（尚未連線到 bridge，請確認 bridge/main.py 啟動了）",
+    "ui.connect.connected": "（已連線，輸入訊息開始對話）",
+    "ui.connect.reconnecting": "（連線中...）",
+    "ui.connect.reconnect_attempt": "（連線中... 第 {0} 次嘗試）",
+    "ui.send.thinking": "（思考中...）",
+    "ui.send.error_prefix": "[錯誤]",
+    "ui.send.unknown_error": "未知錯誤",
+    "ui.persona.loading": "（載入中...）",
+    "ui.persona.role": "角色:{0}",
+    "ui.persona.dropdown_loading": "（載入中...）"
+}

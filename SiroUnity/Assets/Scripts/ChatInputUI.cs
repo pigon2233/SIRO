@@ -61,8 +61,8 @@ namespace Siro
                 sendButton.onClick.AddListener(OnSendClicked);
             }
 
-            // 預設提示
-            SetResponse("（等待連線...）");
+            // 預設提示（i18n）
+            SetResponse(Localization.Get("ui.connect.waiting"));
         }
 
         private void OnDestroy()
@@ -128,11 +128,11 @@ namespace Siro
 
             if (_bridge == null || !_bridge.IsConnected)
             {
-                SetResponse("（尚未連線到 bridge，請確認 bridge/main.py 啟動了）");
+                SetResponse(Localization.Get("ui.connect.disconnected"));
                 return;
             }
 
-            SetResponse("（思考中...）");
+            SetResponse(Localization.Get("ui.send.thinking"));
             _ = _bridge.SendChatAsync(text);
 
             if (clearAfterSend)
@@ -153,12 +153,14 @@ namespace Siro
 
         private void HandleError(BridgeError error)
         {
-            SetResponse($"[錯誤] {error?.detail ?? "未知錯誤"}");
+            var prefix = Localization.Get("ui.send.error_prefix");
+            var unknown = Localization.Get("ui.send.unknown_error");
+            SetResponse($"{prefix} {error?.detail ?? unknown}");
         }
 
         private void HandleConnected()
         {
-            SetResponse("（已連線，輸入訊息開始對話）");
+            SetResponse(Localization.Get("ui.connect.connected"));
         }
 
         // 斷線：bridge 進程死掉、port 改變、WebSocket 收到 close frame。
@@ -166,13 +168,13 @@ namespace Siro
         // EmotionDisplay 也會同步切 thinking 表情（GAPS.md #9 降級路徑 UX）。
         private void HandleDisconnected()
         {
-            SetResponse("（連線中...）");
+            SetResponse(Localization.Get("ui.connect.reconnecting"));
         }
 
         // 重連嘗試：顯示第幾次嘗試，讓使用者看到「系統還在努力」
         private void HandleReconnectAttempt(int attemptNumber)
         {
-            SetResponse($"（連線中... 第 {attemptNumber} 次嘗試）");
+            SetResponse(Localization.Get("ui.connect.reconnect_attempt", attemptNumber));
         }
 
         // ==================== Helper ====================
