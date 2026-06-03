@@ -40,7 +40,7 @@ from .models import (
     Live2DSignal,
     Emotion,
 )
-from .prompts import get_personality
+from .prompts import get_personality, get_fallback_response
 
 # 載入 .env
 load_dotenv()
@@ -118,6 +118,43 @@ app.add_middleware(
 
 # ==================== 端點 ====================
 
+def _make_fallback_response(
+    user_id: str,
+    session_id: str,
+    category: str,
+    persona_name: str,
+    error_detail: str = "",
+) -> ChatResponse:
+    """
+    產生降級回應 — Hermes 不可用 / 失敗時用。
+
+    回 200 + thinking 表情 + persona 的 fallback pool 文字，
+    這樣使用者端 Mao 看起來「在想」而不是「斷線」。
+
+    GAPS.md #4 + #9：離線降級策略 + 降級路徑 UX。
+    """
+    fallback_text = get_fallback_response(category, persona_name=persona_name)
+    if error_detail:
+        logger.warning(f"降級回應觸發 [{category}]: {error_detail}")
+
+    # 用 EmotionParser 拿 thinking 對應的 Live2D signal（avoid hardcode）
+    intensity = 0.5
+    if state.parser is not None:
+        live2d = state.parser.to_live2d_signal(Emotion.THINKING, intensity)
+    else:
+        live2d = Live2DSignal(expression_id="exp_06", intensity=intensity)
+
+    return ChatResponse(
+        text=fallback_text,
+        emotion=Emotion.THINKING,
+        intensity=intensity,
+        live2d=live2d,
+        session_id=session_id,
+        user_id=user_id,
+        raw_response=f"[bridge fallback: {category}] {error_detail}",
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """健康檢查"""
@@ -141,18 +178,26 @@ async def chat(req: ChatRequest) -> ChatResponse:
     2. 解析情緒標籤
     3. 映射成 Live2D 訊號
     4. 記錄 session 歷史
+
+    降級策略（GAPS.md #4 + #9）：
+    - Bridge 內部沒初始化 → 503（系統 bug，明確報錯）
+    - Hermes 不可用 → 200 + 降級回應（Mao 切 thinking 表情、講「嗯..."）
+    - Hermes 失敗 → 200 + 降級回應（同上，但不會破壞使用者體驗）
     """
     if not state.hermes or not state.parser:
         raise HTTPException(status_code=503, detail="Bridge 尚未初始化")
 
-    if not state.hermes.is_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Hermes 不可用，請確認有跑過 agent/install.sh 並設定 LLM",
-        )
-
-    # 決定 session
+    persona_name = req.personality or "default"
     session_id = req.session_id or f"{req.user_id}-{uuid.uuid4().hex[:8]}"
+
+    if not state.hermes.is_available():
+        return _make_fallback_response(
+            user_id=req.user_id,
+            session_id=session_id,
+            category="error",
+            persona_name=persona_name,
+            error_detail="Hermes CLI not available",
+        )
 
     # 載入對話歷史（簡化版：塞進 prompt 上下文）
     history = state.sessions.get(session_id, [])
@@ -167,7 +212,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     if history_context:
         user_message_with_context = f"{history_context}\n\n使用者: {req.message}"
 
-    system_prompt = get_personality(req.personality or "default")
+    system_prompt = get_personality(persona_name)
 
     # 呼叫 Hermes
     result = state.hermes.chat(
@@ -176,10 +221,13 @@ async def chat(req: ChatRequest) -> ChatResponse:
     )
 
     if not result.success:
-        logger.error(f"Hermes 失敗: {result.error}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Hermes 對話失敗: {result.error}",
+        # 降級而非 502：使用者看到「嗯..."而不是「Internal Server Error」
+        return _make_fallback_response(
+            user_id=req.user_id,
+            session_id=session_id,
+            category="error",
+            persona_name=persona_name,
+            error_detail=f"Hermes failed: {result.error}",
         )
 
     # 解析情緒（傳 user_input 讓 parser 對明確情緒詞做強信號 override）
@@ -222,6 +270,11 @@ async def websocket_endpoint(websocket: WebSocket):
         發送: {"type": "chat", "message": "...", "user_id": "..."}
         接收: {"type": "response", "text": "...", "emotion": "...", "live2d": {...}}
         接收: {"type": "error", "detail": "..."}
+
+    降級策略（GAPS.md #4 + #9）：
+    - Bridge 內部沒初始化 → 關連線（這是 bug）
+    - Hermes 不可用 → 維持連線，每次 chat 都回 fallback response（Mao 切 thinking）
+    - Hermes chat 失敗 → 同上
     """
     await websocket.accept()
     logger.info(f"🔌 WebSocket 連線: {websocket.client}")
@@ -231,10 +284,10 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
         return
 
+    # 注意：is_available() false 不關連線。讓 Unity 維持連線、後續每次
+    # chat 走 fallback。這樣 Mao 看起來「在但有點傻」而非「失蹤」。
     if not state.hermes.is_available():
-        await websocket.send_json({"type": "error", "detail": "Hermes 不可用"})
-        await websocket.close()
-        return
+        logger.warning("⚠ Hermes 不可用，但維持 WebSocket 連線、走 fallback response")
 
     try:
         while True:
@@ -254,8 +307,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "detail": "訊息不能空白"})
                     continue
 
-                # 跑對話
                 session_id = f"{user_id}-ws"
+
+                # 降級路徑：Hermes 不可用就直接走 fallback，省下 subprocess 開銷
+                if not state.hermes.is_available():
+                    fallback = _make_fallback_response(
+                        user_id=user_id,
+                        session_id=session_id,
+                        category="disconnected",
+                        persona_name=personality,
+                        error_detail="Hermes not available",
+                    )
+                    await websocket.send_json({
+                        "type": "response",
+                        "text": fallback.text,
+                        "emotion": fallback.emotion.value,
+                        "intensity": fallback.intensity,
+                        "live2d": fallback.live2d.model_dump(),
+                        "session_id": fallback.session_id,
+                    })
+                    continue
+
+                # 跑對話
                 history = state.sessions.get(session_id, [])
                 history_context = ""
                 if history:
@@ -272,9 +345,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
 
                 if not result.success:
+                    # 降級而非 error event：Mao 切 thinking、講「嗯..."
+                    fallback = _make_fallback_response(
+                        user_id=user_id,
+                        session_id=session_id,
+                        category="error",
+                        persona_name=personality,
+                        error_detail=f"Hermes failed: {result.error}",
+                    )
                     await websocket.send_json({
-                        "type": "error",
-                        "detail": result.error or "Hermes 對話失敗",
+                        "type": "response",
+                        "text": fallback.text,
+                        "emotion": fallback.emotion.value,
+                        "intensity": fallback.intensity,
+                        "live2d": fallback.live2d.model_dump(),
+                        "session_id": fallback.session_id,
                     })
                     continue
 

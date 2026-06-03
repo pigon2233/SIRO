@@ -53,6 +53,7 @@ namespace Siro
             _bridge.OnBridgeError += HandleError;
             _bridge.OnBridgeConnected += HandleConnected;
             _bridge.OnBridgeDisconnected += HandleDisconnected;
+            _bridge.OnReconnectAttempt += HandleReconnectAttempt;
 
             // 按鈕
             if (sendButton != null)
@@ -72,6 +73,7 @@ namespace Siro
                 _bridge.OnBridgeError -= HandleError;
                 _bridge.OnBridgeConnected -= HandleConnected;
                 _bridge.OnBridgeDisconnected -= HandleDisconnected;
+                _bridge.OnReconnectAttempt -= HandleReconnectAttempt;
             }
         }
 
@@ -159,9 +161,18 @@ namespace Siro
             SetResponse("（已連線，輸入訊息開始對話）");
         }
 
+        // 斷線：bridge 進程死掉、port 改變、WebSocket 收到 close frame。
+        // 不要說「重啟 Play」— bridge client 會自動重連，UI 顯示「連線中...」更精準。
+        // EmotionDisplay 也會同步切 thinking 表情（GAPS.md #9 降級路徑 UX）。
         private void HandleDisconnected()
         {
-            SetResponse("（已斷線，請重啟 Play 模式）");
+            SetResponse("（連線中...）");
+        }
+
+        // 重連嘗試：顯示第幾次嘗試，讓使用者看到「系統還在努力」
+        private void HandleReconnectAttempt(int attemptNumber)
+        {
+            SetResponse($"（連線中... 第 {attemptNumber} 次嘗試）");
         }
 
         // ==================== Helper ====================

@@ -42,7 +42,9 @@ namespace Siro
             if (bridgeClient != null)
             {
                 bridgeClient.OnBridgeResponse += HandleBridgeResponse;
-                if (verboseLogging) Debug.Log("[EmotionDisplay] 已訂閱 bridge response");
+                bridgeClient.OnBridgeDisconnected += HandleBridgeDisconnected;
+                bridgeClient.OnBridgeConnected += HandleBridgeConnected;
+                if (verboseLogging) Debug.Log("[EmotionDisplay] 已訂閱 bridge response + connect/disconnect");
             }
             else
             {
@@ -59,10 +61,33 @@ namespace Siro
             if (bridgeClient != null)
             {
                 bridgeClient.OnBridgeResponse -= HandleBridgeResponse;
+                bridgeClient.OnBridgeDisconnected -= HandleBridgeDisconnected;
+                bridgeClient.OnBridgeConnected -= HandleBridgeConnected;
             }
         }
 
         // ==================== 內部 ====================
+
+        // 斷線時自動切 thinking 表情（GAPS.md #9 降級路徑 UX）
+        // 比「Mao 一動也不動」好 — 讓使用者感覺角色「在想/在等」
+        private void HandleBridgeDisconnected()
+        {
+            if (verboseLogging) Debug.Log("[EmotionDisplay] bridge 斷線 → 切 thinking 表情");
+            if (_modelController != null)
+            {
+                _modelController.SetExpression(expressionThinking);
+            }
+        }
+
+        // 重連成功時切回 neutral（預設臉），等下一句對話再切真情緒
+        private void HandleBridgeConnected()
+        {
+            if (verboseLogging) Debug.Log("[EmotionDisplay] bridge 連線 → 切 neutral");
+            if (_modelController != null)
+            {
+                _modelController.SetExpression(expressionNeutral);
+            }
+        }
 
         private void HandleBridgeResponse(BridgeResponse response)
         {

@@ -14,6 +14,7 @@ websockets>=12.0
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
+pyyaml>=6.0          # Persona YAML 解析 (Phase 1.5+)
 
 # 測試
 pytest>=8.0.0

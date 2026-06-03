@@ -340,7 +340,54 @@
 **依賴**：Phase 0
 **風險**：
 - ✅ Hermes 介面已驗證清楚（-z flag, 包裝輸出格式）
-- 🟡 Unity + Cubism SDK 還沒實機測過（需手動）
+- ✅ Unity + Cubism SDK 已實機驗證（2026-06-03，9 情緒對 8 expression）
+
+---
+
+### Phase 1.5: GAPS 立刻補強 ✅ 完成 (2026-06-03)
+
+**目標**：填補 [docs/GAPS.md](docs/GAPS.md) 中「不做會卡 Phase 2-3」的 5 項缺口。
+
+**動機**：
+Phase 1 把「能跟 Mao 文字對話」這件事跑通了，但發現幾個**架構性缺口**會影響後續所有 Phase：
+- 角色 SIRO 性格直接 hardcode 在 [bridge/prompts.py](bridge/prompts.py)，未來換角色要重寫
+- bridge / Hermes 掛掉時 Mao 直接沉默無回應，UX 很差
+- 資料存哪、誰能讀、是否加密 — 完全沒寫
+- Phase 結束標準靠主觀感覺，沒量化 KPI
+
+不修這 5 項就硬上 Phase 2 polish，會做出「視覺美 + 結構爛」的成品，未來重構成本高。
+
+**範圍**：
+- Persona schema 抽離（資料與程式碼分離）
+- 離線降級基礎（bridge + Unity 雙端）
+- 隱私現況釐清（不做加密實作，先寫清楚現況 + 未來路線圖）
+- KPI 量化（每 Phase 驗收要有數字）
+
+**交付物**：
+- [x] [docs/PERSONA.md](docs/PERSONA.md) — Persona schema 規範
+- [x] `bridge/personas/siro-default.yaml` — SIRO 第一個 Persona
+- [x] [bridge/prompts.py](bridge/prompts.py) 改 — 從 YAML 讀，不再 hardcode
+- [x] bridge 端離線降級 — Hermes 死時走預設回應池（"嗯..."、"我在想"）
+- [x] Unity 端降級 UX — bridgeClient 斷線時切 thinking 表情 + UI 提示「連線中...」
+- [x] [docs/SECURITY.md](docs/SECURITY.md) 加 §0 — 一頁釐清資料現況 + Phase 4-6 加密路線圖
+- [x] PLAN.md 加 KPI 章節 + 串進每個 Phase 驗收條件
+
+**驗收條件**：
+- [ ] `bridge/personas/siro-default.yaml` 改 personality 字串 → Mao 回應風格真的變
+- [ ] `kill -9` bridge → Unity 在 3 秒內切 thinking 表情 + 顯示「連線中...」
+- [ ] bridge 起來但 Hermes 不可用 → API 回預設回應池而非 502 error
+- [ ] SECURITY.md 至少回答：資料存哪 / 誰能讀 / 重啟後留多少 / v1 加密計畫
+- [ ] PLAN.md 每個 Phase 有量化驗收（時間、成功率、覆蓋率等）
+
+**預估時間**：1 週
+**依賴**：Phase 1 ✅
+**風險**：
+- 🟢 YAML schema 是純結構工作、低風險
+- 🟡 離線降級要驗 edge case（bridge restart、Hermes timeout、Unity 斷線重連）
+- 🟢 文件工作，無技術風險
+
+**為什麼不直接進 Phase 2**：
+Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前要先有穩固的「能持續對話」基礎。Phase 1.5 把這基礎打好，Phase 2 才能專心做視覺。GAPS 剩下的 5 項（i18n / STT-TTS / 災難恢復 / OTA UX / 多人識別）依時機分散到 Phase 2-6，不阻塞 Phase 1.5。
 
 ---
 
@@ -532,6 +579,29 @@
 - 🟡 OTA 安全（要 code signing、避免磚機）
 - 🟢 Packer 與 systemd 相容性 OK
 - 🟢 小規模 fleet 不需要複雜管理工具
+
+---
+
+### 成功指標 (KPI)
+
+> 每個 Phase 結束時要量化驗收。沒 KPI = 永遠「還沒做完」。
+
+| # | 面向 | 指標 | 目標 | Phase |
+|---|------|------|------|-------|
+| K1 | 啟動 | 開機到對話就緒 | < 30 秒 | Phase 4 |
+| K2 | 反應 | 使用者輸入到角色回應 | < 2 秒（本地 LLM）/ < 5 秒（雲端） | Phase 1, 3 |
+| K3 | 穩定 | 24/7 連續運行 | 7 天無當機 | Phase 4 |
+| K4 | 記憶 | 角色記得 N 天前對話 | N ≥ 30 | Phase 1.5+ |
+| K5 | 表情 | 表情切換延遲 | < 200ms | Phase 2 |
+| K6 | 語音 | TTS 開始播放 | < 1.5 秒 | Phase 2-3 |
+| K7 | 隱私 | 預設資料外洩風險 | 0（無雲端 default） | Phase 1.5 |
+| K8 | 降級 | 子系統失敗時角色保持「在線」 | < 3 秒切 fallback | Phase 1.5 |
+| K9 | 可用 | 5 歲到 80 歲會用 | v2 驗證 | v2 |
+| K10 | 測試 | bridge 覆蓋率 | ≥ 80% | Phase 1+ |
+
+每個 Phase 的「驗收條件」應該至少對應 1-3 個 KPI 的數字，**不是**靠「看起來能用」。
+
+詳細：見 [docs/KPI.md](docs/KPI.md)（待寫）。
 
 ---
 

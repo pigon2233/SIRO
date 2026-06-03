@@ -1,6 +1,102 @@
 # SIRO 安全性設計
 
 > SIRO 是「永遠開機、有相機、有麥克風、連網路」的裝置，安全性是基本要求。
+>
+> **本文件結構**：
+> - **§0** = 當前 v0 現況（Phase 1 完成、Phase 1.5 起草）— 釐清「現在資料怎麼處理」
+> - **§1–§10** = v1 目標設計（Phase 4-6 達成）
+
+---
+
+## 0. v0 現況（Phase 1 完成）
+
+> **問題出處**：[docs/GAPS.md](GAPS.md) #1（致命優先級）
+> 這節回答：**現在**資料存哪、誰能讀、重啟後留多少。
+
+### 0.1 TL;DR
+
+| 問題 | v0 答案 |
+|---|---|
+| 雲端傳輸 | ❌ 無（全本地） |
+| 對話紀錄存哪 | bridge 進程記憶體（重啟即失） |
+| LLM 通訊 | bridge ↔ Ollama localhost only |
+| Mic / Camera | 未啟用 |
+| 加密 | 無 |
+| 多人 | 單人單機 |
+
+**核心承諾**：**zero cloud by default**。任何上雲行為要 opt-in 且明確標示。
+
+### 0.2 v0 資料流（全本地）
+
+```
+[使用者輸入]
+   ↓ (WebSocket, plaintext, localhost only)
+[Unity (Mao)]
+   ↓ (ws://127.0.0.1:8001)
+[bridge/main.py]
+   ↓ (subprocess pipe, plaintext)
+[hermes CLI]
+   ↓ (HTTP, plaintext, localhost:11434)
+[Ollama 本地推論]
+```
+
+特性：所有通訊都在 `127.0.0.1`（loopback），無對外端點，**沒上雲**。
+
+### 0.3 資料保存現況
+
+| 資料 | 存哪 | 加密 | 持久 |
+|---|---|---|---|
+| 使用者輸入文字 | bridge `state.sessions` dict | ❌ | 重啟即失 |
+| LLM 回應 | 同上（最近 20 筆對話） | ❌ | 重啟即失 |
+| 情緒判斷結果 | 同上 | ❌ | 重啟即失 |
+| Hermes config | `~/.hermes/config.yaml` | ❌ | 持久 |
+| Ollama model | `~/.ollama/models/` | ❌ | 持久 |
+| bridge logs | stdout（不寫檔） | N/A | 關掉 terminal 即失 |
+| Unity Editor logs | `~/AppData/.../Unity/Editor.log` | ❌ | 持久（含 prompt 範例） |
+
+**結論**：v0 對話紀錄是「**重啟即失憶**」的 RAM-only state。對隱私是好事（無持久個資），對 SIRO 願景「記得 30 天前對話」是壞事 — **Phase 1.5+ 要設計持久 + 加密的記憶系統**。
+
+### 0.4 v0 誰能讀
+
+| 角色 | 能讀什麼 |
+|---|---|
+| 開發者本人 Windows 帳號 | 所有（bridge log / Hermes config / Ollama models / Unity logs） |
+| 同 Windows 帳號的別人 | 所有（沒應用層加密） |
+| 不同 Windows 帳號 | 視 ACL，預設讀不到 |
+| Root / Admin | 所有 |
+| 網路上的人 | ❌ 沒有（bridge 只 bind localhost） |
+| Anthropic / Google / OpenAI | ❌ 沒有（無雲端 API 呼叫） |
+
+### 0.5 v0 已知風險
+
+| 風險 | 嚴重性 | v0 mitigation |
+|---|---|---|
+| 別人實體拿走筆電 | 🔴 高 | 無（沒磁碟加密） |
+| Windows 帳號被駭 | 🔴 高 | 無（沒應用層加密） |
+| bridge crash dump 含對話 | 🟡 中 | 無 |
+| 同網段 ARP spoof | 🟢 低 | bridge bind 127.0.0.1，不可達 |
+| 雲端服務洩漏 | N/A | 無雲端 |
+
+### 0.6 Phase 1.5 範圍（本階段）
+
+**只做文件，不做加密實作**：
+- [x] 寫本節，釐清 v0 現況
+- [ ] bridge 啟動時 log 一行「This SIRO instance stores conversations in RAM only.」
+- [ ] 在 Persona schema 加「資料怎麼存」的使用者面說明
+- [ ] 定義「會話歷史」資料結構（為 Phase 4 加密做準備）
+
+### 0.7 v1 加密路線圖（指向後面章節）
+
+| 項目 | 機制 | 何時 | 詳見 |
+|---|---|---|---|
+| 磁碟全加密 | LUKS（Ubuntu 安裝時開） | Phase 4 | §2 |
+| 應用層敏感資料 | age (modern PGP) | Phase 4 | §3 |
+| 對話歷史持久化 | SQLite + age | Phase 4 | §3, §5 |
+| Mic / Camera 指示燈 | systemd + GPIO LED | Phase 5 | §2.5 |
+| 「忘記我」按鈕 | UI + DB drop | Phase 4 | §5 |
+| 加密本地備份 | restic + age | Phase 6 | §4 |
+| OTA 簽章 | minisign / cosign | Phase 6 | §4 |
+| 一頁 Privacy Policy | 給親友看 | v1 試用前 | (未來 docs/PRIVACY.md) |
 
 ---
 
