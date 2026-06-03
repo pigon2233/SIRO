@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -441,19 +442,23 @@ async def chat(req: ChatRequest) -> ChatResponse:
     persona_name = req.personality or "default"
     session_id = req.session_id or f"{req.user_id}-{uuid.uuid4().hex[:8]}"
 
-    # v1.1 timing log：分段計時方便看哪裡慢
+    # v1.1+：分段計時診斷 — 拆開每段看哪裡慢
+    # ⚠️ 60s 瓶頸診斷專用：把 is_available / history / hermes_chat / parse 拆開 log
     import time
     t_total_start = time.time()
-    t_parser = 0.0
-    t_hermes = 0.0
-    t_parse = 0.0
 
-    # v0.2+：每個 request 依 persona 拿專屬的 EmotionParser（從 persona 讀 expressions）
+    # 段 1: 拿 persona 專屬 parser
     t0 = time.time()
     parser = _build_parser_for_persona(persona_name)
     t_parser = time.time() - t0
 
+    # 段 2: hermes is_available — 同步 subprocess，**會卡 event loop 最多 10s**
+    t0 = time.time()
     if not state.hermes.is_available():
+        t_is_avail = time.time() - t0
+        logger.warning(
+            f"⏱ [chat] 段 2 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
+        )
         return await _make_fallback_response(
             user_id=req.user_id,
             session_id=session_id,
@@ -462,6 +467,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             error_detail="Hermes CLI not available",
             user_message=req.message,
         )
+    t_is_avail = time.time() - t0
 
     # 載入對話歷史（簡化版：塞進 prompt 上下文）
     history = state.sessions.get(session_id, [])
@@ -471,20 +477,31 @@ async def chat(req: ChatRequest) -> ChatResponse:
             f"使用者: {h['user']}\n你: {h['agent']}" for h in history[-5:]
         )
 
-    # 組 prompt
+    # 段 3: 組 prompt（history build + 拼裝，純記憶體操作應該 < 1ms）
+    t0 = time.time()
+    # 載入對話歷史
+    history = state.sessions.get(session_id, [])
+    history_context = ""
+    if history:
+        history_context = "\n\n最近的對話：\n" + "\n".join(
+            f"使用者: {h['user']}\n你: {h['agent']}" for h in history[-5:]
+        )
+
     user_message_with_context = req.message
     if history_context:
         user_message_with_context = f"{history_context}\n\n使用者: {req.message}"
 
     system_prompt = get_personality(persona_name)
+    t_history = time.time() - t0
 
-    # 呼叫 Hermes（用 to_thread 把 subprocess 跑在 thread pool，
-    # 這樣 FastAPI event loop 不會被 3-10 秒的 hermes call 卡住）
+    # 段 4: 呼叫 Hermes（用 to_thread 把 subprocess 跑在 thread pool）
+    t0 = time.time()
     result = await asyncio.to_thread(
         state.hermes.chat,
         message=user_message_with_context,
         system_prompt=system_prompt,
     )
+    t_hermes = time.time() - t0
 
     if not result.success:
         # 降級而非 502：使用者看到「嗯..."而不是「Internal Server Error」
@@ -497,19 +514,21 @@ async def chat(req: ChatRequest) -> ChatResponse:
             user_message=req.message,
         )
 
-    t_hermes = time.time() - t_parser + t0  # 含前面的 parser 時間
-    t_hermes_only = time.time() - t0 - t_parser  # 純 hermes
-
-    # 解析情緒（用 persona 專屬 parser，user_input 對明確情緒詞做強信號 override）
-    t1 = time.time()
+    # 段 5: 解析情緒 + 組 Live2D signal
+    t0 = time.time()
     clean_text, emotion, intensity = parser.parse(
         result.output, user_input=req.message
     )
     live2d_signal = parser.to_live2d_signal(emotion, intensity)
-    t_parse = time.time() - t1
+    t_parse = time.time() - t0
+
+    # 完整分段計時 log — 一眼看出 60s 在哪一段
+    t_total = (time.time() - t_total_start) * 1000
     logger.info(
-        f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value} "
-        f"[⏱ parser={t_parser*1000:.0f}ms hermes={t_hermes_only*1000:.0f}ms parse={t_parse*1000:.0f}ms total={(time.time()-t_total_start)*1000:.0f}ms]"
+        f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}\n"
+        f"   ⏱分段: parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+        f"history={t_history*1000:.0f}ms hermes_chat={t_hermes*1000:.0f}ms parse={t_parse*1000:.0f}ms "
+        f"total={t_total:.0f}ms"
     )
 
     # 記錄歷史（v0.2+：用 RLock 保護，雖 asyncio 序列化但 to_thread 可能並行）
@@ -582,12 +601,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # v0.2+：用 persona 專屬 parser 解析情緒
+                # v1.1+：分段計時診斷 60s 瓶頸
+                t_ws_total = time.time()
+                t0 = time.time()
                 parser = _build_parser_for_persona(personality)
+                t_parser = time.time() - t0
 
                 session_id = f"{user_id}-ws"
 
-                # 降級路徑：Hermes 不可用就直接走 fallback，省下 subprocess 開銷
-                if not state.hermes.is_available():
+                # is_available() — 同步 subprocess，最多 10s 卡 event loop
+                t0 = time.time()
+                hermes_ok = state.hermes.is_available()
+                t_is_avail = time.time() - t0
+
+                # 降級路徑：Hermes 不可用就直接走 fallback
+                if not hermes_ok:
+                    logger.warning(
+                        f"⏱ [ws] 段 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
+                    )
                     fallback = await _make_fallback_response(
                         user_id=user_id,
                         session_id=session_id,
@@ -607,29 +638,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # 跑對話
+                t0 = time.time()
                 history = state.sessions.get(session_id, [])
                 history_context = ""
                 if history:
                     history_context = "\n\n最近的對話：\n" + "\n".join(
                         f"使用者: {h['user']}\n你: {h['agent']}" for h in history[-5:]
                     )
+                t_history = time.time() - t0
 
                 prompt_message = f"{history_context}\n\n使用者: {message}" if history_context else message
                 system_prompt = get_personality(personality)
 
-                # v1.1 timing log：跟 /chat 對齊
-                import time
-                t_ws_start = time.time()
-                t_ws_parser = 0.0
-                t_ws_parse = 0.0
-
-                # to_thread 把 hermes subprocess 跑在 thread pool，
-                # 這樣 FastAPI event loop 不被卡
+                # 段 4: 呼叫 Hermes（to_thread 把 subprocess 跑在 thread pool）
+                t0 = time.time()
                 result = await asyncio.to_thread(
                     state.hermes.chat,
                     message=prompt_message,
                     system_prompt=system_prompt,
                 )
+                t_hermes = time.time() - t0
 
                 if not result.success:
                     # 降級而非 error event：Mao 切 thinking、講「嗯..."
@@ -651,15 +679,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                t1 = time.time()
+                # 段 5: 解析情緒
+                t0 = time.time()
                 clean_text, emotion, intensity = parser.parse(
                     result.output, user_input=message
                 )
                 live2d_signal = parser.to_live2d_signal(emotion, intensity)
-                t_ws_parse = time.time() - t1
+                t_parse = time.time() - t0
+
+                # v1.1+：完整分段計時 log（跟 /chat 對齊）
+                t_ws_total = (time.time() - t_ws_total) * 1000
                 logger.info(
-                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value} "
-                    f"[⏱ hermes={(time.time()-t_ws_start)*1000:.0f}ms parse={t_ws_parse*1000:.0f}ms total={(time.time()-t_ws_start)*1000:.0f}ms]"
+                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}\n"
+                    f"   ⏱分段: parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+                    f"history={t_history*1000:.0f}ms hermes_chat={t_hermes*1000:.0f}ms parse={t_parse*1000:.0f}ms "
+                    f"total={t_ws_total:.0f}ms"
                 )
 
                 # 記錄歷史（v0.2+：RLock 保護，跟 /chat 一致）
