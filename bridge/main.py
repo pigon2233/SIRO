@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .emotion_parser import EmotionParser
 from .hermes_client import HermesClient
 from .ollama_client import OllamaClient
+from .agent_os import AgentOS, Event  # v0.2+ 後台作業系統
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -74,7 +75,11 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 # ==================== 全域狀態 ====================
 
 class BridgeState:
-    """Bridge 全域狀態"""
+    """Bridge 全域狀態
+
+    v0.2+ 加 AgentOS 變成「後台作業系統」架構
+    詳見 docs/AGENT_OS.md
+    """
 
     def __init__(self):
         self.hermes: HermesClient | None = None
@@ -85,6 +90,16 @@ class BridgeState:
         # EmotionParser.__init__ 雖然便宜，但 jieba 詞庫補強在第一次會跑 16 次 add_word
         # cache 起來省下這些 + dict copy
         self.parser_cache: Dict[str, EmotionParser] = {}
+        # v0.2+：AgentOS — task queue + event bus + worker pool
+        # bridge 是「後台作業系統」: 跟 Mao 對話同時可以跑排程、Telegram、stock query
+        self.agent_os = None  # type: Optional[AgentOS]  # 在 lifespan 內啟動
+        # v0.2+：sessions_lock 保護多 thread / 多 request 並行讀寫
+        # 雖然單 process + asyncio 已經序列化大部分 access，但
+        # 1. tasks 在 worker thread pool（to_thread）執行
+        # 2. 之後 v1+ 多觸發源（Telegram / schedule）也會同時寫
+        # 用 RLock 支援 nested lock
+        import threading
+        self.sessions_lock = threading.RLock()
 
 
 state = BridgeState()
@@ -176,8 +191,17 @@ async def lifespan(app: FastAPI):
     for r in routes:
         logger.info(f"    {r}")
 
+    # v0.2+：啟動 AgentOS — 後台作業系統
+    # worker pool 預設 3 個，可以並行跑多個 LLM / Telegram / stock query
+    state.agent_os = AgentOS()
+    await state.agent_os.start(num_workers=3)
+    logger.info("  AgentOS 啟動（3 個 worker，task queue + event bus 就緒）")
+
     yield
 
+    # 關閉
+    if state.agent_os:
+        await state.agent_os.stop()
     logger.info("🛑 SIRO Bridge 關閉")
 
 
@@ -488,16 +512,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
         f"[⏱ parser={t_parser*1000:.0f}ms hermes={t_hermes_only*1000:.0f}ms parse={t_parse*1000:.0f}ms total={(time.time()-t_total_start)*1000:.0f}ms]"
     )
 
-    # 記錄歷史
-    if session_id not in state.sessions:
-        state.sessions[session_id] = []
-    state.sessions[session_id].append({
-        "user": req.message,
-        "agent": clean_text,
-        "emotion": emotion.value,
-    })
-    # 限制歷史長度
-    state.sessions[session_id] = state.sessions[session_id][-20:]
+    # 記錄歷史（v0.2+：用 RLock 保護，雖 asyncio 序列化但 to_thread 可能並行）
+    with state.sessions_lock:
+        if session_id not in state.sessions:
+            state.sessions[session_id] = []
+        state.sessions[session_id].append({
+            "user": req.message,
+            "agent": clean_text,
+            "emotion": emotion.value,
+        })
+        # 限制歷史長度
+        state.sessions[session_id] = state.sessions[session_id][-20:]
 
     return ChatResponse(
         text=clean_text,
@@ -637,14 +662,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     f"[⏱ hermes={(time.time()-t_ws_start)*1000:.0f}ms parse={t_ws_parse*1000:.0f}ms total={(time.time()-t_ws_start)*1000:.0f}ms]"
                 )
 
-                if session_id not in state.sessions:
-                    state.sessions[session_id] = []
-                state.sessions[session_id].append({
-                    "user": message,
-                    "agent": clean_text,
-                    "emotion": emotion.value,
-                })
-                state.sessions[session_id] = state.sessions[session_id][-20:]
+                # 記錄歷史（v0.2+：RLock 保護，跟 /chat 一致）
+                with state.sessions_lock:
+                    if session_id not in state.sessions:
+                        state.sessions[session_id] = []
+                    state.sessions[session_id].append({
+                        "user": message,
+                        "agent": clean_text,
+                        "emotion": emotion.value,
+                    })
+                    state.sessions[session_id] = state.sessions[session_id][-20:]
 
                 await websocket.send_json({
                     "type": "response",

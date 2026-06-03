@@ -37,6 +37,9 @@ namespace Siro
         [Tooltip("settings 按鈕文字 i18n key，{0} = persona name\n" +
                  "預設「角色:{0}」— 純中文，Noto Sans TC 不含 emoji")]
         public string settingsButtonFormatKey = "ui.persona.role";
+        [Tooltip("dropdown 在 persona 清單還沒載入完時顯示的 placeholder i18n key\n" +
+                 "預設「（載入中...）」— 跟 connect waiting 同個語感")]
+        public string dropdownPlaceholderKey = "ui.persona.dropdown_loading";
 
         [Header("Debug")]
         public bool verboseLogging = true;
@@ -61,7 +64,7 @@ namespace Siro
 
             // 預設 dropdown placeholder（i18n）
             dropdown.ClearOptions();
-            dropdown.AddOptions(new List<string> { Localization.Get(placeholderText) });
+            dropdown.AddOptions(new List<string> { Localization.Get(dropdownPlaceholderKey) });
             dropdown.interactable = false;
 
             if (apiClient == null)

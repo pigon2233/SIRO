@@ -45541,15 +45541,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Siro.EmotionDisplay
   bridgeClient: {fileID: 0}
-  expressionHappy: exp_01
-  expressionJoyful: exp_02
-  expressionProud: exp_03
-  expressionExcited: exp_04
-  expressionSad: exp_05
-  expressionThinking: exp_06
-  expressionSurprised: exp_07
-  expressionAngry: exp_08
-  expressionNeutral: exp_01
   verboseLogging: 1
 --- !u!114 &6829035977109871955
 MonoBehaviour:
@@ -45581,15 +45572,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Siro.EmotionDisplay
   bridgeClient: {fileID: 0}
-  expressionHappy: exp_01
-  expressionJoyful: exp_02
-  expressionProud: exp_03
-  expressionExcited: exp_04
-  expressionSad: exp_05
-  expressionThinking: exp_06
-  expressionSurprised: exp_07
-  expressionAngry: exp_08
-  expressionNeutral: exp_01
   verboseLogging: 1
 --- !u!114 &3131998051595424282
 MonoBehaviour:
@@ -45637,15 +45619,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Siro.EmotionDisplay
   bridgeClient: {fileID: 0}
-  expressionHappy: exp_01
-  expressionJoyful: exp_02
-  expressionProud: exp_03
-  expressionExcited: exp_04
-  expressionSad: exp_05
-  expressionThinking: exp_06
-  expressionSurprised: exp_07
-  expressionAngry: exp_08
-  expressionNeutral: exp_01
   verboseLogging: 1
 --- !u!114 &2299037628434023210
 MonoBehaviour:
