@@ -75,6 +75,39 @@ def load_persona(name: str = "siro-default") -> Optional[dict[str, Any]]:
     return data
 
 
+def list_personas() -> list[dict[str, Any]]:
+    """
+    列出所有可用的 persona（讀 bridge/personas/ 目錄）
+
+    v1 多角色用 — Unity persona selector 會 GET /personas 拿這清單。
+
+    Returns:
+        list of {id, name, version, language, model} dict
+    """
+    results = []
+    if not _PERSONAS_DIR.exists():
+        return results
+
+    for path in _PERSONAS_DIR.glob("*.yaml"):
+        # 跳過備份/暫存檔
+        if path.name.startswith(".") or path.name.endswith(".local.yaml"):
+            continue
+        persona_id = path.stem
+        persona = load_persona(persona_id)
+        if persona is None:
+            continue
+        model = persona.get("model", {})
+        results.append({
+            "id": persona.get("id", persona_id),
+            "name": persona.get("name", persona_id),
+            "version": persona.get("version"),
+            "language": persona.get("language"),
+            "model_type": model.get("type"),
+            "prefab_path": model.get("prefab_path"),
+        })
+    return results
+
+
 # ============ Public API ============
 
 # Hardcode fallback — 永遠不會走到，除非 personas/ 整個爛掉
@@ -140,6 +173,41 @@ def get_persona_quirks(name: str = "default") -> dict[str, Any]:
     if persona is None:
         return {}
     return persona.get("model", {}).get("quirks", {})
+
+
+def get_persona_expressions(name: str = "default") -> dict[str, Any]:
+    """
+    取得 persona 的 emotion → Live2D signal 映射（v0.2+ 取代 emotion_mapping.json）
+
+    給 EmotionParser(persona_expressions=...) 用，讓 chat 回應的
+    Live2DSignal 直接走 persona 設定的角色動作，不用再對照舊 JSON。
+
+    Returns:
+        dict 形如 {
+            "happy": {"expression_id": "exp_01", "motion_group": "Idle", ...},
+            "sad": {...},
+            ...
+        }，找不到 persona 回空 dict
+    """
+    persona = load_persona(name)
+    if persona is None:
+        return {}
+    return persona.get("model", {}).get("expressions", {})
+
+
+def get_persona_model_meta(name: str = "default") -> dict[str, Any]:
+    """
+    取得 persona 的模型基本資料（type、prefab_path）給 Unity 動態載入用。
+    """
+    persona = load_persona(name)
+    if persona is None:
+        return {}
+    model = persona.get("model", {})
+    return {
+        "type": model.get("type"),
+        "prefab_path": model.get("prefab_path"),
+        "name": persona.get("name", name),
+    }
 
 
 # ============ 向後相容 ============

@@ -77,18 +77,64 @@ model:
     hide_eye_on_expressions: [exp_02, exp_03]
     eye_drawable_indices: [87, 92]
 
-# ============ 情緒 → expression 映射 ============
-# 跟 bridge/emotion_mapping.json 同步（Phase 2+ 改成單一 source）
-expressions:
-  happy: exp_01      # 開心
-  joyful: exp_02     # 快樂（哈哈大笑、眼球 hack 隱藏）
-  proud: exp_03      # 驕傲（眼球 hack 隱藏）
-  excited: exp_04    # 興奮
-  sad: exp_05        # 難過
-  thinking: exp_06   # 害羞（借用為思考）
-  surprised: exp_07  # 驚訝
-  angry: exp_08      # 生氣
-  neutral: exp_01    # 借用 happy（中性偏正面）
+  # ============ 情緒 → Live2D signal 映射（v0.2：合併舊 emotion_mapping.json）============
+  # 之前 emotion_mapping.json 跟這份 YAML 雙重維護，現在 persona 是 single source of truth。
+  # 換角色 = 寫新 persona YAML，不再改 JSON。
+  expressions:
+    happy:
+      expression_id: exp_01
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.7
+      duration_ms: 500
+    joyful:
+      expression_id: exp_02
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.95
+      duration_ms: 400
+    proud:
+      expression_id: exp_03
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.8
+      duration_ms: 500
+    excited:
+      expression_id: exp_04
+      motion_group: Idle
+      motion_index: 0
+      intensity: 1.0
+      duration_ms: 400
+    sad:
+      expression_id: exp_05
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.7
+      duration_ms: 600
+    angry:
+      expression_id: exp_08
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.85
+      duration_ms: 400
+    surprised:
+      expression_id: exp_07
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.9
+      duration_ms: 300
+    thinking:
+      expression_id: exp_06
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.5
+      duration_ms: 700
+    neutral:
+      expression_id: exp_01
+      motion_group: Idle
+      motion_index: 0
+      intensity: 0.5
+      duration_ms: 500
 
 # ============ 待機動作 (Phase 2 用) ============
 idle_motions: []   # Phase 2 補

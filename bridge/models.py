@@ -56,6 +56,35 @@ class HealthResponse(BaseModel):
     bridge_version: str = "0.1.0"
 
 
+class PersonaSummary(BaseModel):
+    """Persona 摘要（給 UI 列表用）"""
+    id: str
+    name: str
+    version: Optional[str] = None
+    language: Optional[str] = None
+    # 視覺模型基本資料
+    model_type: Optional[str] = None
+    prefab_path: Optional[str] = None
+
+
+class PersonaDetail(PersonaSummary):
+    """Persona 完整資料（含 Live2D signal 設定、quirks）"""
+    # quirks
+    hide_eye_on_expressions: list[str] = Field(default_factory=list)
+    eye_drawable_indices: list[int] = Field(default_factory=list)
+    # emotions 對應的 Live2D signals
+    expressions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # 待機動作
+    idle_motions: list[str] = Field(default_factory=list)
+    idle_interval_seconds: list[int] = Field(default_factory=list)
+
+
+class PersonaListResponse(BaseModel):
+    """GET /personas 回應"""
+    personas: list[PersonaSummary]
+    current_default: str = "siro-default"
+
+
 class ErrorResponse(BaseModel):
     """錯誤回應"""
     error: str

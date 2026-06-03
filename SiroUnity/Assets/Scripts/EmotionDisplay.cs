@@ -1,8 +1,11 @@
 // unity/Assets/Scripts/EmotionDisplay.cs
 //
-// 把 bridge 回傳的 emotion 翻譯成 Live2D 動作。
-// 掛在跟 Live2DModelController 同一個 GameObject 上。
+// v0.2 重構：emotion → expression 對照表不再 hardcode 在 Inspector。
+// bridge 回應已經帶 `live2d.expression_id`（從 persona YAML 的 model.expressions
+// 解析而來），這邊直接拿來用。
 //
+// v1+ 多角色：當 persona 切換時 PersonaManager 會去拿新 persona 的 quirk 設定
+// 套用到 Live2DModelController（hide_eye_on_expressions、eye_drawable_indices）。
 
 using UnityEngine;
 
@@ -13,19 +16,6 @@ namespace Siro
     {
         [Header("References")]
         public HermesBridgeClient bridgeClient;
-
-        [Header("Emotion → Expression Mapping")]
-        [Tooltip("Mao 8 個 expression 已用 ExpressionViewer 校準 (v0.3)。" +
-                 "9 情緒對應 8 表情：happy/neutral 共用 exp_01，其他一對一。")]
-        public string expressionHappy = "exp_01";      // 開心
-        public string expressionJoyful = "exp_02";     // 快樂（哈哈大笑）
-        public string expressionProud = "exp_03";      // 驕傲
-        public string expressionExcited = "exp_04";    // 興奮
-        public string expressionSad = "exp_05";        // 難過
-        public string expressionThinking = "exp_06";   // 害羞 ≈ 思考
-        public string expressionSurprised = "exp_07";  // 驚訝
-        public string expressionAngry = "exp_08";      // 生氣
-        public string expressionNeutral = "exp_01";    // 借用 happy（中性偏正面）
 
         [Header("Debug")]
         public bool verboseLogging = true;
@@ -48,7 +38,6 @@ namespace Siro
             }
             else
             {
-                // 改成 info 等級（v0 開發期不阻擾，之後真正接 bridge 再警告）
                 if (verboseLogging)
                 {
                     Debug.Log("[EmotionDisplay] 沒有指派 bridgeClient（可在 Inspector 拖 HermesBridgeClient 進來）");
@@ -69,13 +58,16 @@ namespace Siro
         // ==================== 內部 ====================
 
         // 斷線時自動切 thinking 表情（GAPS.md #9 降級路徑 UX）
-        // 比「Mao 一動也不動」好 — 讓使用者感覺角色「在想/在等」
+        // v0.2：bridge 回傳的 expression_id 是 thinking 對應的 exp_06
+        // 這裡寫死是因為「斷線狀態」不需要 persona 客製 — 用通用 exp_06
+        private const string THINKING_EXPRESSION_ID = "exp_06";
+
         private void HandleBridgeDisconnected()
         {
             if (verboseLogging) Debug.Log("[EmotionDisplay] bridge 斷線 → 切 thinking 表情");
             if (_modelController != null)
             {
-                _modelController.SetExpression(expressionThinking);
+                _modelController.SetExpression(THINKING_EXPRESSION_ID);
             }
         }
 
@@ -85,46 +77,36 @@ namespace Siro
             if (verboseLogging) Debug.Log("[EmotionDisplay] bridge 連線 → 切 neutral");
             if (_modelController != null)
             {
-                _modelController.SetExpression(expressionNeutral);
+                // v0.2：neutral 也用 exp_06（思考中），跟原本邏輯一致
+                _modelController.SetExpression(THINKING_EXPRESSION_ID);
             }
         }
 
+        // v0.2：bridge 已經把 emotion→expression_id 對照做完
+        // 直接用 response.live2d.expression_id，不做本地對照
         private void HandleBridgeResponse(BridgeResponse response)
         {
-            if (response == null || string.IsNullOrEmpty(response.emotion))
+            if (response == null || response.live2d == null)
             {
-                Debug.LogWarning("[EmotionDisplay] 收到空的 response");
+                Debug.LogWarning("[EmotionDisplay] 收到空的 response 或無 live2d 訊號");
                 return;
             }
 
-            var expressionId = MapEmotionToExpression(response.emotion);
+            var expressionId = response.live2d.expression_id;
+            if (string.IsNullOrEmpty(expressionId))
+            {
+                Debug.LogWarning($"[EmotionDisplay] response.live2d.expression_id 是空（emotion={response.emotion}）");
+                return;
+            }
 
             if (verboseLogging) Debug.Log(
                 $"[EmotionDisplay] 收到情緒: {response.emotion} → expression: {expressionId}"
             );
 
-            // 觸發 Live2D 表情切換
             if (_modelController != null)
             {
                 _modelController.SetExpression(expressionId);
             }
-        }
-
-        private string MapEmotionToExpression(string emotion)
-        {
-            return emotion.ToLower() switch
-            {
-                "happy" => expressionHappy,
-                "joyful" => expressionJoyful,
-                "proud" => expressionProud,
-                "sad" => expressionSad,
-                "angry" => expressionAngry,
-                "surprised" => expressionSurprised,
-                "thinking" => expressionThinking,
-                "excited" => expressionExcited,
-                "neutral" => expressionNeutral,
-                _ => expressionNeutral,
-            };
         }
     }
 }

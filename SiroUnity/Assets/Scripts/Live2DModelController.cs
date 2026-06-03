@@ -34,9 +34,11 @@ namespace Siro
 
         [Header("Eye-Hiding Hack (workaround for Mao 閉眼設計不完整)")]
         [Tooltip("切到下列 expression 時，會把 eyeDrawableIndices 指到的 Drawable MeshRenderer 隱藏，" +
-                 "避免閉眼但瞳孔露出的視覺問題。用 Tools/SIRO/Drawable Inspector 找出眼球的 index。")]
+                 "避免閉眼但瞳孔露出的視覺問題。用 Tools/SIRO/Drawable Inspector 找出眼球的 index。\n\n" +
+                 "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public string[] hideEyeOnExpressions = new[] { "exp_02", "exp_03" };
-        [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）")]
+        [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）\n\n" +
+                 "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public int[] eyeDrawableIndices = new[] { 87, 92 };
 
 #if SIRO_HAS_CUBISM
@@ -49,6 +51,40 @@ namespace Siro
         // 暫存目前的 expression 名稱，避免重複觸發
         private string _currentExpressionId = "";
         private Coroutine _blendCoroutine;
+
+        // ==================== v0.2 Persona 切換支援 ====================
+
+        /// <summary>
+        /// v0.2+：PersonaManager 切換 persona 時呼叫，覆寫 quirks 設定
+        /// （hide_eye_on_expressions、eye_drawable_indices）。
+        /// </summary>
+        /// <remarks>
+        /// 會在下一個 SetExpression 自動套用新設定。
+        /// 對同 prefab 的「表情集不同」角色很有用 — 換 quirk 不用重 build prefab。
+        /// </remarks>
+        public void SetQuirks(string[] hideEyeOnExpressions, int[] eyeDrawableIndices)
+        {
+            this.hideEyeOnExpressions = hideEyeOnExpressions ?? new string[0];
+            this.eyeDrawableIndices = eyeDrawableIndices ?? new int[0];
+
+#if SIRO_HAS_CUBISM
+            // 重新 cache eye renderers（如果 index 變了）
+            if (_eyeRenderers != null)
+            {
+                CacheEyeRenderers();
+                // 重新套用當前 expression 的 eye 隱藏邏輯
+                if (!string.IsNullOrEmpty(_currentExpressionId))
+                {
+                    SetEyeRenderersVisible(ShouldHideEyeFor(_currentExpressionId));
+                }
+            }
+#endif
+
+            if (verboseLogging) Debug.Log(
+                $"[Live2DModelController] SetQuirks: hide_eye_on={string.Join(",", this.hideEyeOnExpressions)}, " +
+                $"eye_indices=[{string.Join(",", this.eyeDrawableIndices)}]"
+            );
+        }
 
 #if SIRO_HAS_CUBISM
         private void Awake()

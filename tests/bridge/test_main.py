@@ -401,3 +401,108 @@ class TestWebSocket:
                 assert pong["type"] == "pong"
         finally:
             state.hermes = original
+
+
+# ==================== /personas (v1 多角色切換) ====================
+
+class TestPersonasList:
+    """GET /personas — 拿所有可用 persona 清單"""
+
+    def test_list_returns_siro_default(self, client, mock_hermes, mock_ollama_available, real_parser):
+        r = client.get("/personas")
+        assert r.status_code == 200
+        data = r.json()
+        assert "personas" in data
+        assert "current_default" in data
+        # 至少有 siro-default（測試環境一定有）
+        ids = [p["id"] for p in data["personas"]]
+        assert "siro-default" in ids
+
+    def test_list_includes_model_meta(self, client, mock_hermes, mock_ollama_available, real_parser):
+        r = client.get("/personas")
+        data = r.json()
+        siro = next(p for p in data["personas"] if p["id"] == "siro-default")
+        # PersonaSummary 應含 model_type / prefab_path
+        assert siro["model_type"] == "cubism"
+        assert "Mao" in (siro.get("prefab_path") or "")
+
+
+class TestPersonaDetail:
+    """GET /personas/{id} — 拿單一 persona 完整資料（含 Live2D 設定）"""
+
+    def test_siro_default_detail_has_expressions(self, client, mock_hermes, mock_ollama_available, real_parser):
+        r = client.get("/personas/siro-default")
+        assert r.status_code == 200
+        data = r.json()
+        # 9 種 emotion 都要有
+        for emo in ["happy", "joyful", "proud", "excited", "sad", "angry", "surprised", "thinking", "neutral"]:
+            assert emo in data["expressions"], f"缺少 emotion: {emo}"
+            assert "expression_id" in data["expressions"][emo]
+
+    def test_siro_default_detail_has_quirks(self, client, mock_hermes, mock_ollama_available, real_parser):
+        r = client.get("/personas/siro-default")
+        data = r.json()
+        # Mao 預設 quirks
+        assert "exp_02" in data["hide_eye_on_expressions"]
+        assert "exp_03" in data["hide_eye_on_expressions"]
+        assert 87 in data["eye_drawable_indices"]
+        assert 92 in data["eye_drawable_indices"]
+
+    def test_siro_default_expressions_match_legacy_json(self, client, mock_hermes, mock_ollama_available, real_parser):
+        """v0.2：persona 的 expression_id 必須跟舊 emotion_mapping.json 一致"""
+        import json
+        r = client.get("/personas/siro-default")
+        data = r.json()
+        expressions = data["expressions"]
+
+        # 跟舊 emotion_mapping.json 對照
+        with open("bridge/emotion_mapping.json", "r", encoding="utf-8") as f:
+            legacy = json.load(f)
+        legacy_map = legacy["emotion_map"]
+
+        for emo, legacy_cfg in legacy_map.items():
+            assert emo in expressions, f"persona 缺 {emo}"
+            assert expressions[emo]["expression_id"] == legacy_cfg["expression_id"]
+            assert expressions[emo]["intensity"] == legacy_cfg["intensity"]
+            assert expressions[emo]["duration_ms"] == legacy_cfg["duration_ms"]
+
+    def test_nonexistent_persona_returns_404(self, client, mock_hermes, mock_ollama_available, real_parser):
+        r = client.get("/personas/totally-fake-xyz")
+        assert r.status_code == 404
+
+
+# ==================== /chat 用 persona 切換（v0.2 整合測試）====================
+
+class TestChatWithPersona:
+    """v0.2：/chat 帶 personality 應該走對應的 expression_id"""
+
+    def test_default_persona_uses_siro_expressions(
+        self, client, mock_hermes, mock_ollama_available, real_parser
+    ):
+        mock_hermes.chat.return_value = HermesResult(
+            success=True,
+            output="[emotion:joyful] 哈哈！",
+        )
+        r = client.post("/chat", json={
+            "message": "好笑",
+            "user_id": "u1",
+            "personality": "siro-default",
+        })
+        assert r.status_code == 200
+        data = r.json()
+        # siro-default 將 joyful 對應到 exp_02
+        assert data["live2d"]["expression_id"] == "exp_02"
+
+    def test_chat_without_personality_uses_default(
+        self, client, mock_hermes, mock_ollama_available, real_parser
+    ):
+        """不指定 personality → 用 siro-default（向後相容）"""
+        mock_hermes.chat.return_value = HermesResult(
+            success=True,
+            output="[emotion:sad] 蛤...",
+        )
+        r = client.post("/chat", json={"message": "難過", "user_id": "u1"})
+        assert r.status_code == 200
+        data = r.json()
+        # siro-default 將 sad 對應到 exp_05
+        assert data["live2d"]["expression_id"] == "exp_05"

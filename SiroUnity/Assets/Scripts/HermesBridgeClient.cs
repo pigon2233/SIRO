@@ -67,7 +67,18 @@ namespace Siro
 
         [Header("Identity")]
         public string userId = "unity_user";
+        [Tooltip("目前使用的 persona ID，會被 PersonaManager runtime 切換")]
         public string personality = "default";
+
+        /// <summary>
+        /// v1+ 多角色切換：PersonaManager 切 persona 時呼叫，之後送出的 chat 都帶新 personality
+        /// </summary>
+        public void SetActivePersonality(string personaId)
+        {
+            if (string.IsNullOrEmpty(personaId)) return;
+            personality = personaId;
+            Debug.Log($"[HermesBridgeClient] 切換 personality: {personaId}");
+        }
 
         [Header("Reconnect")]
         [Tooltip("啟用自動重連")]

@@ -41,8 +41,19 @@ from .models import (
     HealthResponse,
     Live2DSignal,
     Emotion,
+    PersonaSummary,
+    PersonaDetail,
+    PersonaListResponse,
 )
-from .prompts import get_personality, get_fallback_response
+from .prompts import (
+    get_personality,
+    get_fallback_response,
+    get_persona_expressions,
+    get_persona_model_meta,
+    get_persona_quirks,
+    list_personas,
+    load_persona,
+)
 
 # 載入 .env
 load_dotenv()
@@ -73,6 +84,16 @@ class BridgeState:
 
 
 state = BridgeState()
+
+
+def _build_parser_for_persona(persona_name: str) -> EmotionParser:
+    """依 persona 名字建一個配好 expressions 的 EmotionParser
+
+    v0.2+：emotion_mapping.json 已併入 persona，parser 從 persona["model"]["expressions"]
+    拿設定。換 persona 就重建一個（dict copy 很便宜）。
+    """
+    expressions = get_persona_expressions(persona_name)
+    return EmotionParser(persona_expressions=expressions)
 
 
 @asynccontextmanager
@@ -177,15 +198,12 @@ async def _make_fallback_response(
         persona_name=persona_name,
     )
     if ollama_text is not None:
-        # Ollama 給了真的回應 → 走正常 emotion parse
-        if state.parser is not None:
-            clean_text, emotion, intensity = state.parser.parse(
-                ollama_text, user_input=user_message
-            )
-            live2d = state.parser.to_live2d_signal(emotion, intensity)
-        else:
-            clean_text, emotion, intensity = ollama_text, Emotion.THINKING, 0.5
-            live2d = Live2DSignal(expression_id="exp_06", intensity=intensity)
+        # Ollama 給了真的回應 → 走正常 emotion parse（用 persona parser）
+        persona_parser = _build_parser_for_persona(persona_name)
+        clean_text, emotion, intensity = persona_parser.parse(
+            ollama_text, user_input=user_message
+        )
+        live2d = persona_parser.to_live2d_signal(emotion, intensity)
         logger.info(
             f"↩ soft fallback (Ollama) user={user_message[:40]!r} → "
             f"llm={ollama_text[:80]!r} → emotion={emotion.value}"
@@ -203,10 +221,8 @@ async def _make_fallback_response(
     # ---- 2. Hard fallback：persona 靜態文字 + thinking 表情 ----
     fallback_text = get_fallback_response(category, persona_name=persona_name)
     intensity = 0.5
-    if state.parser is not None:
-        live2d = state.parser.to_live2d_signal(Emotion.THINKING, intensity)
-    else:
-        live2d = Live2DSignal(expression_id="exp_06", intensity=intensity)
+    persona_parser = _build_parser_for_persona(persona_name)
+    live2d = persona_parser.to_live2d_signal(Emotion.THINKING, intensity)
 
     logger.info(
         f"↩ hard fallback (static) user={user_message[:40]!r} → text={fallback_text!r}"
@@ -291,6 +307,59 @@ async def health() -> HealthResponse:
     )
 
 
+@app.get("/personas", response_model=PersonaListResponse)
+async def get_personas() -> PersonaListResponse:
+    """列出所有可用的 persona（v1 多角色切換用）
+
+    Unity persona selector 會打這 endpoint 拿清單給 UI dropdown。
+    """
+    personas_data = list_personas()
+    summaries = [
+        PersonaSummary(
+            id=p["id"],
+            name=p["name"],
+            version=p.get("version"),
+            language=p.get("language"),
+            model_type=p.get("model_type"),
+            prefab_path=p.get("prefab_path"),
+        )
+        for p in personas_data
+    ]
+    return PersonaListResponse(personas=summaries, current_default="siro-default")
+
+
+@app.get("/personas/{persona_id}", response_model=PersonaDetail)
+async def get_persona_detail(persona_id: str) -> PersonaDetail:
+    """拿單一 persona 完整資料（含 Live2D 設定、quirks）
+
+    Unity 在切換角色時會打這 endpoint 拿：
+    - prefab_path：要動態載入的 prefab
+    - expressions：emotion → Live2D signal 對照
+    - quirks：角色特殊設定（眼動 hack 之類）
+    """
+    persona = load_persona(persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail=f"persona '{persona_id}' not found")
+
+    model_meta = get_persona_model_meta(persona_id)
+    quirks = get_persona_quirks(persona_id)
+    expressions = get_persona_expressions(persona_id)
+
+    return PersonaDetail(
+        id=persona.get("id", persona_id),
+        name=persona.get("name", persona_id),
+        version=persona.get("version"),
+        language=persona.get("language"),
+        model_type=model_meta.get("type"),
+        prefab_path=model_meta.get("prefab_path"),
+        hide_eye_on_expressions=quirks.get("hide_eye_on_expressions", []),
+        eye_drawable_indices=quirks.get("eye_drawable_indices", []),
+        expressions=expressions,
+        idle_motions=persona.get("idle_motions", []),
+        idle_interval_seconds=persona.get("idle_interval_seconds", [15, 45]),
+    )
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     """
@@ -312,6 +381,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     persona_name = req.personality or "default"
     session_id = req.session_id or f"{req.user_id}-{uuid.uuid4().hex[:8]}"
+
+    # v0.2+：每個 request 依 persona 拿專屬的 EmotionParser（從 persona 讀 expressions）
+    parser = _build_parser_for_persona(persona_name)
 
     if not state.hermes.is_available():
         return await _make_fallback_response(
@@ -357,11 +429,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
             user_message=req.message,
         )
 
-    # 解析情緒（傳 user_input 讓 parser 對明確情緒詞做強信號 override）
-    clean_text, emotion, intensity = state.parser.parse(
+    # 解析情緒（用 persona 專屬 parser，user_input 對明確情緒詞做強信號 override）
+    clean_text, emotion, intensity = parser.parse(
         result.output, user_input=req.message
     )
-    live2d_signal = state.parser.to_live2d_signal(emotion, intensity)
+    live2d_signal = parser.to_live2d_signal(emotion, intensity)
     logger.info(
         f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
     )
@@ -434,6 +506,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "detail": "訊息不能空白"})
                     continue
 
+                # v0.2+：用 persona 專屬 parser 解析情緒
+                parser = _build_parser_for_persona(personality)
+
                 session_id = f"{user_id}-ws"
 
                 # 降級路徑：Hermes 不可用就直接走 fallback，省下 subprocess 開銷
@@ -495,10 +570,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                clean_text, emotion, intensity = state.parser.parse(
+                clean_text, emotion, intensity = parser.parse(
                     result.output, user_input=message
                 )
-                live2d_signal = state.parser.to_live2d_signal(emotion, intensity)
+                live2d_signal = parser.to_live2d_signal(emotion, intensity)
                 logger.info(
                     f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
                 )

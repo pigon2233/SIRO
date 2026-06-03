@@ -151,13 +151,29 @@ STRONG_USER_SIGNALS = {
 
 
 class EmotionParser:
-    """情緒解析器"""
+    """情緒解析器
 
-    def __init__(self, mapping_file: Optional[str] = None):
+    兩個資料來源（優先序）：
+    1. `persona_expressions` (v0.2+) — 從 persona YAML 的 model.expressions 傳入
+       每個 emotion 對應 Live2DSignal 欄位 (expression_id, motion_group, ...)
+    2. `mapping_file` (legacy) — 讀 emotion_mapping.json
+       為了向後相容保留，沒有 persona 時才用
+
+    換角色 = 換 persona → EmotionParser(persona_expressions=persona["model"]["expressions"])
+    """
+
+    def __init__(
+        self,
+        persona_expressions: Optional[Dict[str, Any]] = None,
+        mapping_file: Optional[str] = None,
+    ):
         """
         Args:
-            mapping_file: emotion_mapping.json 的路徑
+            persona_expressions: 直接傳入 emotion → Live2DSignal config 的 dict
+                                 （從 persona["model"]["expressions"] 來）
+            mapping_file: emotion_mapping.json 的路徑（legacy fallback）
         """
+        self.persona_expressions = persona_expressions or {}
         if mapping_file is None:
             mapping_file = Path(__file__).parent / "emotion_mapping.json"
 
@@ -198,7 +214,7 @@ class EmotionParser:
             strong = self._strong_user_signal(user_input)
             if strong is not None:
                 clean_text = self._clean_for_display(agent_response)
-                emotion_config = self.mapping.get("emotion_map", {}).get(strong.value, {})
+                emotion_config = self._get_emotion_config(strong.value)
                 intensity = emotion_config.get("intensity", 0.7)
                 logger.info(
                     f"強信號 override: user='{user_input[:30]}' → {strong.value} "
@@ -223,10 +239,19 @@ class EmotionParser:
         clean_text = self._clean_for_display(agent_response)
 
         # 3. 從映射表拿強度
-        emotion_config = self.mapping.get("emotion_map", {}).get(emotion.value, {})
+        emotion_config = self._get_emotion_config(emotion.value)
         intensity = emotion_config.get("intensity", 0.7)
 
         return clean_text, emotion, intensity
+
+    def _get_emotion_config(self, emotion_value: str) -> Dict[str, Any]:
+        """拿某 emotion 對應的 Live2D signal config
+
+        優先 persona_expressions（v0.2+），fallback 到 self.mapping（legacy）。
+        """
+        if self.persona_expressions:
+            return self.persona_expressions.get(emotion_value, {})
+        return self.mapping.get("emotion_map", {}).get(emotion_value, {})
 
     @staticmethod
     def _clean_for_display(raw: str) -> str:
@@ -310,7 +335,7 @@ class EmotionParser:
         Returns:
             Live2DSignal: 給前端的動畫指令
         """
-        config = self.mapping.get("emotion_map", {}).get(emotion.value, {})
+        config = self._get_emotion_config(emotion.value)
 
         return Live2DSignal(
             expression_id=config.get("expression_id", "F01"),
