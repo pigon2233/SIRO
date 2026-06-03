@@ -71,7 +71,10 @@ personality:
 # ============ 視覺模型 ============
 model:
   type: cubism
-  prefab_path: Live2D/Cubism/Samples/Models/Mao/Mao.prefab
+  # prefab_path: 留空 = 沿用場景內 character（Mao 已經在 MainScene instantiate）
+  # 想讓 persona 自動從 prefab 載入：把 prefab 放進 Assets/Resources/，
+  # 然後填路徑，例如 "Characters/MyMao"（不含副檔名）
+  prefab_path: ""
   quirks:
     # exp_02/03 閉眼但眼球露出，runtime 隱藏這些 Drawable（見 SETUP_NOTES Phase 8 坑 7）
     hide_eye_on_expressions: [exp_02, exp_03]

@@ -124,14 +124,27 @@ namespace Siro
         {
             // 簡易實作：從 Resources/ 載入 prefab
             // v1.1+ 換 Addressables
-            if (verboseLogging) Debug.Log($"[PersonaManager] 載入 prefab: {config.prefab_path}");
+
+            // 沒指定 prefab_path → 沿用場景內的 character（最常見的 siro-default 場景）
+            if (string.IsNullOrEmpty(config.prefab_path))
+            {
+                if (verboseLogging) Debug.Log($"[PersonaManager] persona 沒指定 prefab_path，沿用場景內 character");
+                yield break;
+            }
+
+            if (verboseLogging) Debug.Log($"[PersonaManager] 嘗試載入 prefab: {config.prefab_path}");
 
             // Resources.Load 需要 path 不含副檔名
-            // prefab_path 範例："Live2D/Cubism/Samples/Models/Mao/Mao"
             var loaded = Resources.Load<GameObject>(config.prefab_path);
             if (loaded == null)
             {
-                Debug.LogError($"[PersonaManager] 找不到 prefab at Resources/{config.prefab_path}");
+                // 找不到不一定是錯 — 場景可能已經 instantiate 這個角色了（siro-default 場景就是這種）
+                // 沿用場景內的 character，只套 quirks 即可
+                if (verboseLogging) Debug.LogWarning(
+                    $"[PersonaManager] 找不到 prefab at Resources/{config.prefab_path}\n" +
+                    $"  → 場景內 character 應該已經是這個 persona — 沿用、只套 quirks\n" +
+                    $"  → 真正要從 prefab 載請把 prefab 放進 Assets/Resources/，路徑 = Resources 之後的部分"
+                );
                 yield break;
             }
 
