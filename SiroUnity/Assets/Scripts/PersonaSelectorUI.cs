@@ -34,9 +34,9 @@ namespace Siro
         public bool hideDropdownByDefault = true;
         [Tooltip("選完 persona 後自動收合 dropdown")]
         public bool autoCollapseAfterSelect = true;
-        [Tooltip("settings 按鈕文字格式，{0} = persona name\n" +
-                 "預設「角色：{0}」— 避免用 emoji/特殊符號，Noto Sans TC 不含")]
-        public string settingsButtonFormat = "角色:{0}";
+        [Tooltip("settings 按鈕文字 i18n key，{0} = persona name\n" +
+                 "預設「角色:{0}」— 純中文，Noto Sans TC 不含 emoji")]
+        public string settingsButtonFormatKey = "ui.persona.role";
 
         [Header("Debug")]
         public bool verboseLogging = true;
@@ -59,9 +59,9 @@ namespace Siro
                 _isDropdownVisible = false;
             }
 
-            // 預設 dropdown placeholder
+            // 預設 dropdown placeholder（i18n）
             dropdown.ClearOptions();
-            dropdown.AddOptions(new List<string> { "（載入中...）" });
+            dropdown.AddOptions(new List<string> { Localization.Get(placeholderText) });
             dropdown.interactable = false;
 
             if (apiClient == null)
@@ -197,10 +197,11 @@ namespace Siro
                 }
             }
 
-            // 更新齒輪按鈕文字（顯示「⚙ SIRO」之類）
+            // 更新齒輪按鈕文字（i18n 從 zh-TW.json 拿「角色:{0}」format）
             if (settingsButtonLabel != null)
             {
-                settingsButtonLabel.text = string.Format(settingsButtonFormat, config.name);
+                var fmt = Localization.Get(settingsButtonFormatKey, config.name);
+                settingsButtonLabel.text = fmt;
             }
         }
     }
