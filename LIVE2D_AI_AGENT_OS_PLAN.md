@@ -344,7 +344,7 @@
 
 ---
 
-### Phase 1.5: GAPS 立刻補強 ✅ 完成 (2026-06-03)
+### Phase 1.5: GAPS 立刻補強 ⚠️ 代碼完成、待 runtime 驗證
 
 **目標**：填補 [docs/GAPS.md](docs/GAPS.md) 中「不做會卡 Phase 2-3」的 5 項缺口。
 
@@ -373,11 +373,12 @@ Phase 1 把「能跟 Mao 文字對話」這件事跑通了，但發現幾個**�
 - [x] PLAN.md 加 KPI 章節 + 串進每個 Phase 驗收條件
 
 **驗收條件**：
-- [ ] `bridge/personas/siro-default.yaml` 改 personality 字串 → Mao 回應風格真的變
-- [ ] `kill -9` bridge → Unity 在 3 秒內切 thinking 表情 + 顯示「連線中...」
-- [ ] bridge 起來但 Hermes 不可用 → API 回預設回應池而非 502 error
-- [ ] SECURITY.md 至少回答：資料存哪 / 誰能讀 / 重啟後留多少 / v1 加密計畫
-- [ ] PLAN.md 每個 Phase 有量化驗收（時間、成功率、覆蓋率等）
+- [x] [docs/SECURITY.md](docs/SECURITY.md) §0 回答：資料存哪 / 誰能讀 / 重啟後留多少 / v1 加密計畫
+- [x] PLAN.md 每個 Phase 有量化驗收（K1-K10 對應 — 見每 Phase 章節）
+- [x] PLAN.md Phase 2-6 都有 GAPS 對應子節（剩 5 項分散處理）
+- [ ] **runtime**：`bridge/personas/siro-default.yaml` 改 personality 字串 → Mao 回應風格真的變
+- [ ] **runtime**：`Ctrl+C` 殺 bridge → Unity 在 3 秒內切 thinking 表情 + 顯示「連線中...」
+- [ ] **runtime**：bridge 啟動時 `~/.hermes/config.yaml` 故意改壞 → API 回預設回應池 + thinking emotion，而非 502
 
 **預估時間**：1 週
 **依賴**：Phase 1 ✅
@@ -395,28 +396,36 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：完善 Live2D 互動體驗，加上視覺效果
 
+**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+- **#10 i18n**：UI 字串抽到 `i18n/zh-TW.json`，為未來換 Persona 換語言鋪路
+- **#9 降級路徑（細化）**：Phase 1.5 只做了「連線中」提示，Phase 2 要做更細：subprocess 卡住 vs 完全斷線 vs LLM timeout 的不同 UI 表現
+
 **範圍**：
 - 表情平滑過渡
-- 待機動作（呼吸、眨眼）
+- 待機動作（呼吸、眨眼）— 注意跟 eye-hiding hack (`hideEyeOnExpressions`) 不要打架
 - 點擊互動
-- Loading 狀態視覺
-- 多個 Hiyori 動作（idle, tap head, tap body）
+- Loading 狀態視覺（接續 Phase 1.5 的「連線中...」做更細）
+- 多個 Mao motion（idle, tap head, tap body）
+- UI 字串抽出（i18n 基礎）
 
 **交付物**：
-- [ ] `Live2DModelController` 支援 motion 播放
+- [ ] `Live2DModelController` 支援 motion 播放（含 Animator 設定 SOP）
 - [ ] `EmotionDisplay` 支援表情過渡動畫
-- [ ] 待機動作自動 loop
-- [ ] 視覺設定檔（亮度、縮放）
+- [ ] 待機動作自動 loop + 跟 EyeBlinkController 共存（眨眼週期 4-7s）
+- [ ] 視覺設定檔（亮度、縮放）— 寫進 Persona YAML 的 `model.display`
 - [ ] 截圖功能（debug 用）
+- [ ] `SiroUnity/Assets/i18n/zh-TW.json` + ChatInputUI 從這讀字串
 
-**驗收條件**：
-- [ ] 角色不說話時有自然的待機動作
-- [ ] 表情切換有 0.3-0.5s 平滑過渡
-- [ ] 切換時不閃爍、不穿幫
-- [ ] 點擊角色有反饋
+**驗收條件**（對應 KPI）：
+- [ ] 角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）
+- [ ] **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）
+- [ ] 表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫
+- [ ] 點擊角色有反饋（Mao 看向滑鼠 / 切表情）
+- [ ] **K10**: bridge tests 覆蓋率 ≥ 80%（含 Phase 1.5 新加的 Persona/fallback path）
+- [ ] 改 `i18n/en-US.json` UI 不用改 code 就變英文
 
 **預估時間**：1-2 週
-**依賴**：Phase 1
+**依賴**：Phase 1.5 ✅
 **風險**：
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
@@ -427,6 +436,11 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：建立 Rust 系統 daemon，提供 OS 級服務管理
 
+**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+- **#2 多模態（音訊基礎）**：Rust 端 audio pipeline 草案（cpal 採音 → STT pipe → bridge）。STT/TTS 模型選型（whisper.cpp / piper）。實際語音整合留 Phase 5（要硬體）
+- **#4 離線降級（細化）**：siro-runtime 完整 health check pipeline — bridge 死 → siro-supervisor 偵測 → 重啟 → Unity 看到「siro reloading」
+- **#9 降級路徑（per-subsystem）**：每個 subsystem 失敗都要定義「使用者會看到什麼」+「角色解釋話術」
+
 **範圍**：
 - `siro-runtime` daemon
 - 監控 bridge、hermes、unity 進程
@@ -435,6 +449,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 硬體抽象（音訊、視訊、顯示）
 - 設定管理
 - Logging
+- **STT/TTS 選型 ADR** + Rust 端 audio I/O 接口
 
 **交付物**：
 - [ ] `os-runtime/Cargo.toml` workspace
@@ -442,21 +457,26 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [ ] `os-runtime/crates/siro-ctl/` CLI 工具
 - [ ] `os-runtime/crates/siro-ipc/` IPC protocol 定義
 - [ ] gRPC proto 檔（與 bridge 共用）
-- [ ] 進程 supervisor
+- [ ] 進程 supervisor（重啟時 Unity 收到 "siro reloading" event，不會看到突兀斷線）
 - [ ] 硬體偵測
 - [ ] 設定檔讀寫
+- [ ] `docs/STT_TTS_DECISION.md` — 選型 ADR（whisper.cpp / piper / 雲端）
+- [ ] `docs/SUBSYSTEM_FAILURE.md` — per-subsystem 失敗 → 角色話術對應表
 - [ ] `os-runtime/tests/` 80% 覆蓋率
 - [ ] `os-runtime/README.md` 開發指南
 
-**驗收條件**：
+**驗收條件**（對應 KPI）：
 - [ ] `siro-runtime` 可以 `cargo build --release` 通過
 - [ ] `siro-ctl status` 顯示所有服務狀態
-- [ ] kill bridge 進程後自動重啟
+- [ ] kill bridge 進程後 < 5 秒自動重啟（不是只「會重啟」，要量測時間）
 - [ ] gRPC 介面與 bridge 對接測試通過
+- [ ] **K2**: 使用者輸入 → 角色回應 < 2 秒（本地 LLM）
+- [ ] **K8**: 任意 subsystem 死掉 → Mao 在 < 3 秒切 fallback 表情
 - [ ] 記憶體常駐 < 30MB
+- [ ] **K10**: os-runtime 覆蓋率 ≥ 80%
 
 **預估時間**：3-4 週
-**依賴**：Phase 1（bridge 要先有 API 介面）
+**依賴**：Phase 1（bridge API）、Phase 1.5（fallback 概念）
 **風險**：
 - 🔴 Rust 學習曲線（第一次寫可能踩坑多）
 - 🟡 gRPC proto 跨語言相容性
@@ -468,6 +488,10 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：把現在的 Windows 開發機改成 Ubuntu Server 24.04 LTS 雙系統（或全替換）
 
+**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+- **#1 隱私（加密實作）**：LUKS 全碟加密（安裝時開）+ age 應用層加密敏感資料 + SQLite 持久對話歷史（加密儲存）+「忘記我」按鈕
+- **#10 i18n（系統層）**：LANG / LC_ALL 統一設 zh_TW.UTF-8，systemd journal 多語環境變數，IME 設定
+
 **範圍**：
 - Ubuntu Server 24.04 LTS 安裝
 - NVIDIA 驅動 + CUDA 工具鏈
@@ -476,24 +500,31 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 安全政策（AppArmor、ufw）
 - Kiosk 模式（X11 + openbox）
 - 自動登入 + 開機啟動
+- **LUKS 全碟加密 + age 應用層加密**
+- **持久對話歷史（SQLite + age 加密）**
+- **i18n LANG 環境設定**
 
 **交付物**：
-- [ ] `os/install/` 自動安裝腳本
+- [ ] `os/install/` 自動安裝腳本（含 LUKS prompt）
 - [ ] `os/systemd/*.service` 服務定義
 - [ ] `os/kiosk/` X11 / openbox 設定
 - [ ] `os/security/` AppArmor profiles
 - [ ] `os/network/` ufw rules
 - [ ] `os/README.md` 安裝步驟
+- [ ] `bridge/memory/` SQLite + age 對話歷史持久化（取代 Phase 1 的 RAM-only state.sessions）
+- [ ] 「忘記我講過的話」UI 按鈕 + bridge DELETE endpoint
 - [ ] 開機到 Live2D 角色出現 < 30 秒
-- [ ] 24/7 穩定度測試（72 小時不當機）
 
-**驗收條件**：
+**驗收條件**（對應 KPI）：
+- [ ] **K1**: 開機到對話就緒 < 30 秒
 - [ ] 開機自動進入 kiosk，無手動操作
 - [ ] 切換 Windows ↔ Linux 雙系統正常
-- [ ] NVIDIA GPU CUDA 跑本地 LLM 推論 < 5 秒回應
+- [ ] **K2**: NVIDIA GPU CUDA 跑本地 LLM 推論 < 2 秒回應
 - [ ] 重啟 10 次都正常
-- [ ] 跑 72 小時不 crash
-- [ ] 硬碟壞一個 sector 不影響運作（用 RAID 或定期備份）
+- [ ] **K3**: 跑 7 天不 crash
+- [ ] **K4**: 角色記得 N ≥ 30 天前對話（SQLite 持久化）
+- [ ] **K7**: 預設無雲端外洩（封掉 ufw outgoing 仍能跑）
+- [ ] 硬碟壞一個 sector 不影響運作（RAID 或定期備份）
 
 **預估時間**：2-3 週
 **依賴**：Phase 3（Rust 服務要先有）
@@ -502,12 +533,17 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 🔴 雙系統 / 完整替換要決策
 - 🟡 Kiosk 模式有眉角（keybind 鎖定、escape hatch）
 - 🟡 systemd 服務啟動順序要 tune
+- 🟡 LUKS + age key 管理（key 丟了資料解不出來，但這是設計）
 
 ---
 
 ### Phase 5: 硬體整合
 
 **目標**：把系統打包到實際的硬體配置上
+
+**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+- **#2 多模態（語音實裝）**：Phase 3 選好的 STT/TTS 模型在真實 mic/speaker 上整合 + 延遲量測
+- **#1 隱私（硬體層）**：mic/camera 實體指示燈（系統用 ↔ LED 亮）+ 麥克風硬體開關
 
 **範圍**：
 - 音訊設定（內建麥克風、外接 USB 麥克風陣列）
@@ -517,22 +553,27 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 電源管理
 - 散熱管理
 - 實體按鈕（選配：重啟、靜音）
+- **STT/TTS pipeline 真實硬體整合**
+- **mic/camera 指示燈（GPIO LED 或軟體 overlay）**
 
 **交付物**：
 - [ ] `hardware/specs.md` 推薦硬體清單
-- [ ] `hardware/audio.md` 音訊設定
-- [ ] `hardware/camera.md` 視訊設定
+- [ ] `hardware/audio.md` 音訊設定 + STT/TTS pipeline 量測
+- [ ] `hardware/camera.md` 視訊設定 + 指示燈電路
 - [ ] `hardware/assembly.md` 組裝指南（如果是改裝筆電）
 - [ ] `os/audio/` ALSA / PulseAudio 設定
 - [ ] `os/video/` V4L2 設定
 - [ ] `os/power/` power management
+- [ ] `os/indicators/` mic/camera LED 控制 service
 - [ ] 熱監控 + 風扇控制
 
-**驗收條件**：
+**驗收條件**（對應 KPI）：
 - [ ] 麥克風收音清楚、距離 1 米可辨識
 - [ ] 攝影機人臉偵測可抓到 1-3 米距離
 - [ ] 觸控螢幕點擊準確（如果有的話）
 - [ ] 鍵盤訊號被鎖（kiosk 模式生效）
+- [ ] **K6**: TTS 開始播放 < 1.5 秒（量測 LLM 結束 → 第一個 audio chunk）
+- [ ] mic 在用 → LED 亮，mic 沒在用 → LED 滅（兩者狀態 1 秒內同步）
 - [ ] 散熱穩定，CPU 溫度 < 80°C
 - [ ] 電源中斷恢復自動開機
 
@@ -548,30 +589,49 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：可以快速複製到 2-10 台裝置、支援 OTA 更新
 
+**目標**：可以快速複製到 2-10 台裝置、支援 OTA 更新
+
+**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+- **#5 災難恢復**：4 級災難（角色記憶損毀 / 系統當機 / SSD 壞 / 整台丟）的恢復 SOP + 備份格式（角色 + 記憶 + 設定 + 對話歷史 + age 加密）
+- **#6 OTA UX**：升級狀態 state machine、角色升級前主動告知、失敗自動回滾、避開使用者常用時段
+- **#8 多人識別**：使用者 profile schema、預設裝置隔離、手動匯出匯入
+
 **範圍**：
 - 系統映像檔建立（Packer）
 - 設定檔管理（每台裝置不同）
-- OTA 更新機制
+- OTA 更新機制 + UX state machine
 - 遙測（log 集中、健康檢查）
-- 備份 / 還原
+- 備份 / 還原（含加密）
 - 監控與警報
+- **災難恢復 SOP（4 級）**
+- **使用者 profile schema（裝置 = 帳號，v1 不做切換）**
+- **一頁 Privacy Policy（給親友看）**
 
 **交付物**：
 - [ ] `scripts/build-image.sh` Packer 腳本
-- [ ] `scripts/ota-update.sh` OTA 工具
+- [ ] `scripts/ota-update.sh` OTA 工具（含簽章驗證 + A/B partition）
 - [ ] `os/config-template/` 每台裝置的 config 範本
-- [ ] `os/backup/` 備份腳本
+- [ ] `os/backup/` 備份腳本（restic + age）
 - [ ] `os/monitoring/` 健康檢查 + 警報
 - [ ] `docs/DEPLOYMENT.md` 部署 SOP
 - [ ] `docs/OPERATIONS.md` 營運手冊
+- [ ] `docs/DISASTER_RECOVERY.md` — 4 級災難恢復 SOP
+- [ ] `docs/PRIVACY.md` — 給使用者的一頁版（從 SECURITY.md 提煉）
+- [ ] 「桌面備份/還原」UI 按鈕（爸媽會按的等級）
+- [ ] OTA 升級 state machine 實作（升級中、回滾、失敗）
+- [ ] 角色升級話術（「我需要重啟一下」「剛剛有點不適」）
 - [ ] 第一台以外的測試（朋友 / 家人）
 
-**驗收條件**：
-- [ ] 從 0 到完成部屬一台裝置 < 30 分鐘
-- [ ] OTA 更新一輪 < 10 分鐘、不中斷服務
+**驗收條件**（對應 KPI）：
+- [ ] **K1**: 從 0 到完成部屬一台裝置 < 30 分鐘
+- [ ] OTA 更新一輪 < 10 分鐘、不中斷服務（升級中角色說「我重啟一下」而非直接斷）
 - [ ] 設定一台裝置只需要改一個 config 檔
 - [ ] log 集中可查詢
-- [ ] 硬碟故障可在 10 分鐘內還原
+- [ ] **L1 災難** (記憶損毀) 恢復 < 5 分鐘
+- [ ] **L2 災難** (系統當機) 恢復 < 2 分鐘（systemd 重啟）
+- [ ] **L3 災難** (SSD 壞) 恢復 < 1 小時（image restore）
+- [ ] **L4 災難** (整台丟) 恢復 < 1 天（雲端加密備份）
+- [ ] OTA 升級中斷 → 自動回滾、不磚機
 
 **預估時間**：2-3 週
 **依賴**：Phase 4 + 5
@@ -579,6 +639,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 🟡 OTA 安全（要 code signing、避免磚機）
 - 🟢 Packer 與 systemd 相容性 OK
 - 🟢 小規模 fleet 不需要複雜管理工具
+- 🟡 親友當小白鼠的 UX 反饋（要快速迭代）
 
 ---
 
