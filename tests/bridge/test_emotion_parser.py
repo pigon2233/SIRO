@@ -183,20 +183,38 @@ class TestFallbackKeyword:
         emotion = parser._fallback_keyword(text)
         assert emotion == Emotion.JOYFUL
 
-    @pytest.mark.xfail(
-        reason="substring matching bug: '天氣' 含 '氣' → 誤判 angry。需改 word boundary 匹配",
-        strict=True,
-    )
     def test_keyword_substring_false_positive_known_bug(self, parser: EmotionParser):
-        """記錄已知 bug：純 substring 匹配會誤判
+        """jieba 斷詞後比對，「天氣」不會誤觸「氣」(angry)
 
-        「天氣」含「氣」→ 誤判 angry
-        「氣球」、「開心」（含「開」）... 都有類似問題
+        之前用純 substring matching 會誤判：
+        - 「天氣」含「氣」→ 誤判 angry
+        - 「氣球」、「開心」（含「開」）... 都有類似問題
 
-        修法：改用 jieba 斷詞後比對、或用 word boundary regex
+        修法：jieba 斷詞後比對 token set，「天氣」斷成 [今天, 天氣, 還, 不錯]，
+        token set 沒有獨立「氣」，不誤判。
         """
         emotion = parser._fallback_keyword("今天天氣還不錯")
         assert emotion == Emotion.NEUTRAL
+
+    def test_keyword_balloon_no_false_positive(self, parser: EmotionParser):
+        """「氣球」含「氣」也不該誤判 angry — jieba 切 [氣球]"""
+        emotion = parser._fallback_keyword("我有一個紅色氣球")
+        assert emotion == Emotion.NEUTRAL
+
+    def test_keyword_angry_still_works(self, parser: EmotionParser):
+        """「生氣」要能被正確抓到 angry — jieba 不切開"""
+        emotion = parser._fallback_keyword("我好生氣")
+        assert emotion == Emotion.ANGRY
+
+    def test_strong_signal_user_chinese_angry(self, parser: EmotionParser):
+        """user 說「我超生氣」要走 angry（jieba 不會切開「生氣」）"""
+        _, emotion, _ = parser.parse("好的", user_input="我超生氣")
+        assert emotion == Emotion.ANGRY
+
+    def test_strong_signal_user_chinese_surprised(self, parser: EmotionParser):
+        """user 說「真的嗎」要走 surprised（jieba 不會切開「真的嗎」）"""
+        _, emotion, _ = parser.parse("好的", user_input="真的嗎?!")
+        assert emotion == Emotion.SURPRISED
 
 
 # ==================== to_live2d_signal ====================

@@ -16,7 +16,12 @@ pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
 pyyaml>=6.0          # Persona YAML 解析 (Phase 1.5+)
 
+# 中文 NLP — emotion_parser 斷詞用，避免「天氣」誤觸「氣」(angry)
+# 沒裝也能跑，會 graceful 退回 char-level substring matching
+jieba>=0.42.0
+
 # 測試
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
 httpx>=0.27.0

@@ -3,8 +3,11 @@ bridge/emotion_parser.py - 解析 Hermes 輸出中的情緒標籤
 
 策略：
 1. 優先：解析 `[emotion:xxx]` 標籤（Hermes 已被 prompt 要求輸出）
-2. 備援：用簡單的關鍵字比對
+2. 備援：用 jieba 斷詞後比對關鍵字（避免 substring 假陽性）
 3. 都失敗：回傳 neutral
+
+注意：jieba 啟動時會建立 prefix dict（第一次 ~0.5s），
+已用 jieba.dt.cache 做 module-level singleton 避免重複建。
 """
 
 from __future__ import annotations
@@ -18,6 +21,89 @@ from typing import Optional, Dict, Any
 from .models import Emotion, Live2DSignal
 
 logger = logging.getLogger(__name__)
+
+# jieba 延遲載入（避免 import 時就花 0.5s 建 dict）
+_JIEBA = None
+
+
+def _segment_chinese(text: str) -> list[str]:
+    """中文斷詞。jieba 不可用時退回 char-level（無 word boundary）
+
+    Returns:
+        list of tokens。jieba 模式回 ["今天", "天氣", "還", "不錯"]，
+        退回模式回 ["今", "天", "天", "氣", "還", "不", "錯"]（每字一個 token）
+    """
+    jieba = _get_jieba()
+    if jieba is None:
+        # 退回 char-level：把連續中文字拆成單字 token，
+        # 非中文字（英數、標點、空格）保留原樣。
+        # 注意這模式其實就退化成 substring matching，
+        # 留著只是「jieba 沒裝也不會 crash」的 graceful degradation。
+        tokens = []
+        buf = ""
+        for ch in text:
+            if "一" <= ch <= "鿿":  # CJK Unified Ideographs
+                if buf:
+                    tokens.append(buf)
+                    buf = ""
+                tokens.append(ch)
+            else:
+                buf += ch
+        if buf:
+            tokens.append(buf)
+        return tokens
+    return list(jieba.cut(text))
+
+
+# 常見情緒詞的 jieba 詞庫補強
+# 動機：jieba 預設字典會把「生氣」切成「超生」+「氣」或「真的嗎」切成「真的」+「嗎」，
+# 導致 EMOTION_KEYWORDS / STRONG_USER_SIGNALS 裡的 multi-char 詞匹配不到。
+# 這裡把情緒關鍵字強制加進 jieba user dict，讓斷詞時不被切開。
+_EMOTION_BOOST_WORDS = [
+    # SAD
+    "難過", "傷心", "沮喪", "好難受", "好悲傷", "心痛",
+    # ANGRY
+    "生氣", "憤怒", "討厭", "氣死", "可惡",
+    # SURPRISED
+    "真的嗎", "天啊", "天哪", "我的天",
+    # EXCITED
+    "太棒了", "超棒",
+    # JOYFUL
+    "哈哈哈", "太好笑",
+    # PROUD
+    "我超棒", "我超猛", "我超厲害",
+    # THINKING
+    "讓我想", "讓我思考", "我想想",
+    # HAPPY
+    "開心", "高興",
+]
+
+
+def _boost_jieba_dict(jieba):
+    """把情緒關鍵字加到 jieba user dict（freq=高，確保不被切開）"""
+    for word in _EMOTION_BOOST_WORDS:
+        # freq=1_000_000 確保優先級最高
+        jieba.add_word(word, freq=1_000_000, tag="emotion")
+
+
+def _get_jieba():
+    """取得 jieba 模組（延遲載入 + 自動加情緒詞到 user dict）"""
+    global _JIEBA
+    if _JIEBA is None:
+        try:
+            import jieba
+            # jieba 預設 INFO log 太吵，壓成 WARNING
+            jieba.setLogLevel("WARNING")
+            # 把情緒詞加進 user dict，確保斷詞時不被切開
+            _boost_jieba_dict(jieba)
+            _JIEBA = jieba
+        except ImportError:
+            logger.warning(
+                "jieba 沒裝，_fallback_keyword 退回 substring 匹配（會有 false positive 如「天氣」→ angry）。"
+                "pip install jieba 修正"
+            )
+            _JIEBA = False  # 標記為不可用，避免重試
+    return _JIEBA if _JIEBA else None
 
 
 # 情緒標籤的 regex 模式
@@ -157,23 +243,54 @@ class EmotionParser:
         return s.strip()
 
     def _strong_user_signal(self, user_input: str) -> Optional[Emotion]:
-        """檢查使用者輸入是否含強信號關鍵字（明確情緒詞）"""
-        text_lower = user_input.lower()
+        """檢查使用者輸入是否含強信號關鍵字（明確情緒詞）
+
+        用 jieba 斷詞後比對 — 「天氣」斷成 [天, 氣]，不會誤觸「氣」(angry)。
+        英文/數字 token 走原樣比對。
+        """
+        tokens = _segment_chinese(user_input)
+        token_set = {t.lower() for t in tokens}
+        token_str = " ".join(tokens).lower()  # 給 substring 比對 (英文關鍵字如 "lol")
+
         for emotion, keywords in STRONG_USER_SIGNALS.items():
             for kw in keywords:
-                if kw.lower() in text_lower:
-                    return emotion
+                kw_lower = kw.lower()
+                # 純英數關鍵字（"lol", "lmao", "yes!!"）走 substring
+                # 中文關鍵字走 token set 比對（jieba 斷詞後的完整詞）
+                if _is_chinese(kw):
+                    if kw_lower in token_set:
+                        return emotion
+                else:
+                    if kw_lower in token_str:
+                        return emotion
         return None
 
     def _fallback_keyword(self, text: str) -> Emotion:
-        """備援：關鍵字比對"""
-        text_lower = text.lower()
+        """備援：關鍵字比對（jieba 斷詞版）
+
+        之前用 substring 匹配會誤判（「天氣」含「氣」→ angry）。
+        改用 jieba 斷詞後的 token set 比對：
+        - 「天氣」斷成 [今天, 天氣, 還, 不錯] — token set 沒有「氣」，不誤判
+        - 「生氣」斷成 [我, 好, 生氣] — token set 有「生氣」，正確命中 angry
+        """
+        tokens = _segment_chinese(text)
+        token_set = {t.lower() for t in tokens}
+        # 也保留 joined string 給英文/數字關鍵字用 substring
+        token_str = " ".join(tokens).lower()
+
         scores: Dict[Emotion, int] = {e: 0 for e in EMOTION_KEYWORDS}
 
         for emotion, keywords in EMOTION_KEYWORDS.items():
             for kw in keywords:
-                if kw.lower() in text_lower:
-                    scores[emotion] += 1
+                kw_lower = kw.lower()
+                if _is_chinese(kw):
+                    # 中文：token set 完全匹配（避免「天氣」誤觸「氣」）
+                    if kw_lower in token_set:
+                        scores[emotion] += 1
+                else:
+                    # 英數：substring 即可（"lol", "lmao", "thinking" 等）
+                    if kw_lower in token_str:
+                        scores[emotion] += 1
 
         # 找最高分
         best = max(scores.items(), key=lambda x: x[1])
@@ -202,3 +319,13 @@ class EmotionParser:
             intensity=min(1.0, max(0.0, intensity)),
             duration_ms=config.get("duration_ms", 500),
         )
+
+
+def _is_chinese(s: str) -> bool:
+    """字串是否含中文字（CJK Unified Ideographs）
+
+    用來分流匹配策略：
+    - 中文關鍵字：jieba 斷詞後 token set 比對（避免 substring 假陽性）
+    - 英數關鍵字：substring 比對（jieba 不會切英文）
+    """
+    return any("一" <= ch <= "鿿" for ch in s)
