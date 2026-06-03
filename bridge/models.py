@@ -8,13 +8,15 @@ from enum import Enum
 
 
 class Emotion(str, Enum):
-    """支援的情緒種類（v0 鎖定 7 種）"""
+    """支援的情緒種類（v0.2 = 9 種，對應 Mao 8 個 expression + neutral 借用）"""
     HAPPY = "happy"
     SAD = "sad"
     ANGRY = "angry"
     SURPRISED = "surprised"
     THINKING = "thinking"
     EXCITED = "excited"
+    JOYFUL = "joyful"      # 比 happy 更強的開心，哈哈大笑（exp_02）
+    PROUD = "proud"        # 驕傲、得意（exp_03）
     NEUTRAL = "neutral"
 
 

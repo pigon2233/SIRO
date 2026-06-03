@@ -182,9 +182,14 @@ async def chat(req: ChatRequest) -> ChatResponse:
             detail=f"Hermes 對話失敗: {result.error}",
         )
 
-    # 解析情緒
-    clean_text, emotion, intensity = state.parser.parse(result.output)
+    # 解析情緒（傳 user_input 讓 parser 對明確情緒詞做強信號 override）
+    clean_text, emotion, intensity = state.parser.parse(
+        result.output, user_input=req.message
+    )
     live2d_signal = state.parser.to_live2d_signal(emotion, intensity)
+    logger.info(
+        f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
+    )
 
     # 記錄歷史
     if session_id not in state.sessions:
@@ -273,8 +278,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                clean_text, emotion, intensity = state.parser.parse(result.output)
+                clean_text, emotion, intensity = state.parser.parse(
+                    result.output, user_input=message
+                )
                 live2d_signal = state.parser.to_live2d_signal(emotion, intensity)
+                logger.info(
+                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
+                )
 
                 if session_id not in state.sessions:
                     state.sessions[session_id] = []

@@ -1,63 +1,77 @@
 {
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "情緒 → Live2D (Cubism) 動作映射",
   "model_info": {
     "name": "Cubism SDK Mao (範例模型)",
     "source": "Live2D Cubism SDK 內建 Samples",
     "license": "可商用（SDK 授權）",
-    "note": "Mao 在 Assets/Live2D/Cubism/Samples/Models/Mao/，有 8 個 expression (exp_01-exp_08)。原本預設用 Hiyori (F01-F06)，但 Hiyori 下載不完整，改用 Mao。對應不準的話，告訴我哪個 exp 對應哪個情緒。"
+    "note": "Mao 8 個 expression (exp_01-exp_08) 已用 Tools/SIRO/Expression Viewer 校準。v0.3.0 加 joyful + proud，所有 8 個 expression 都有對應情緒。exp_02/03 的眼睛 bug 已修（ParamEyeBallForm=1）。"
   },
   "expressions": {
-    "exp_01": {"name": "default", "description": "預設表情（猜測）"},
-    "exp_02": {"name": "happy_1", "description": "可能開心 1"},
-    "exp_03": {"name": "angry_1", "description": "可能生氣 1"},
-    "exp_04": {"name": "sad_1", "description": "可能難過 1"},
-    "exp_05": {"name": "happy_2", "description": "可能開心 2"},
-    "exp_06": {"name": "angry_2", "description": "可能生氣 2"},
-    "exp_07": {"name": "sad_2", "description": "可能難過 2"},
-    "exp_08": {"name": "surprised_1", "description": "可能驚訝"}
+    "exp_01": {"name": "happy", "description": "開心"},
+    "exp_02": {"name": "joyful", "description": "快樂（哈哈大笑）"},
+    "exp_03": {"name": "proud", "description": "驕傲"},
+    "exp_04": {"name": "excited", "description": "興奮"},
+    "exp_05": {"name": "sad", "description": "難過"},
+    "exp_06": {"name": "thinking", "description": "害羞（借用為 thinking）"},
+    "exp_07": {"name": "surprised", "description": "驚訝"},
+    "exp_08": {"name": "angry", "description": "生氣"}
   },
   "motions": {
     "Idle": "待機動作（呼吸、微動）"
   },
   "emotion_map": {
     "happy": {
+      "expression_id": "exp_01",
+      "motion_group": "Idle",
+      "motion_index": 0,
+      "intensity": 0.7,
+      "duration_ms": 500
+    },
+    "joyful": {
       "expression_id": "exp_02",
+      "motion_group": "Idle",
+      "motion_index": 0,
+      "intensity": 0.95,
+      "duration_ms": 400
+    },
+    "proud": {
+      "expression_id": "exp_03",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 0.8,
       "duration_ms": 500
     },
     "sad": {
-      "expression_id": "exp_04",
+      "expression_id": "exp_05",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 0.7,
       "duration_ms": 600
     },
     "angry": {
-      "expression_id": "exp_03",
+      "expression_id": "exp_08",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 0.85,
       "duration_ms": 400
     },
     "surprised": {
-      "expression_id": "exp_08",
+      "expression_id": "exp_07",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 0.9,
       "duration_ms": 300
     },
     "thinking": {
-      "expression_id": "exp_01",
+      "expression_id": "exp_06",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 0.5,
       "duration_ms": 700
     },
     "excited": {
-      "expression_id": "exp_05",
+      "expression_id": "exp_04",
       "motion_group": "Idle",
       "motion_index": 0,
       "intensity": 1.0,

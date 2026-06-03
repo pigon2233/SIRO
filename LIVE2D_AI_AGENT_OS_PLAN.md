@@ -4,7 +4,7 @@
 
 > **版本**：v2.0（2026-06-02 重構）
 > **目標讀者**：本計畫書是給**人類與 AI 協作開發**用的規格文件，每個 Phase 都有明確的交付物、驗收條件、可委派的工作項目。
-> **狀態**：Phase 0-1 進行中，其餘為規劃
+> **狀態**：Phase 0 進行中、**Phase 1 ✅ 完成**（2026-06-03 含 Unity Play 實測），其餘為規劃
 
 ---
 
@@ -309,7 +309,7 @@
 - [x] Hermes Agent 實際安裝：v0.15.1，clone+uv 模式
 - [x] LLM 設定：Ollama + llama3.2:3b-instruct-q4_0（128K context）
 - [x] **E2E 驗證**：bridge → Hermes → Ollama → 回應「HELLO!」
-- [ ] Unity Play 模式實機測試（需 Unity Editor 手動）
+- [x] Unity Play 模式實機測試（✓ 實測，2026-06-03，使用 Mao 模型 9 種情緒對應 8 個 expression）
 
 **驗收條件**：
 - [x] `bash agent/install.sh` 自動偵測+安裝（✓ 實測）
@@ -319,7 +319,7 @@
 - [x] `curl localhost:8001/chat` 拿到含 LLM 回應（✓ 實測，回 "HELLO!"）
 - [x] `python -m pytest bridge/tests/ -v` 全綠（✓ 78/78 pass）
 - [x] 覆蓋率 ≥ 80%（✓ 92%）
-- [ ] Unity Play 模式能跟 Hiyori 打字對話（需 Unity Editor 手動，下一階段做）
+- [x] Unity Play 模式能跟 Mao 打字對話（✓ 實測，2026-06-03，9 情緒切換 + 中文 + 眼球 hack）
 
 **真實安裝紀錄**（這台筆電上的）：
 - Hermes: v0.15.1 (2026.5.29) @ `~/hermes-agent/.venv/Scripts/hermes.exe`

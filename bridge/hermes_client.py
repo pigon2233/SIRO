@@ -146,14 +146,22 @@ class HermesClient:
         """
         import time
 
-        # 組指令：hermes -p "<message>"
+        # 組指令：hermes -z "<prompt>"
         # 確認過的 hermes CLI 介面：-z 帶 prompt (不是 -p)
-        cmd = [self.binary_path, "-z", message] + self.extra_args
+        #
+        # System prompt 傳遞策略：inline 進 message。
+        # 之前嘗試過 env["HERMES_SYSTEM_PROMPT"]，但 Hermes 不認識這個 env var，
+        # 結果 LLM 看不到情緒 tag 規則 → 永遠 fallback 成 neutral。
+        # 直接拼接是最可靠的：LLM 100% 收得到規則，emotion_parser 用 regex
+        # 抽 [emotion:xxx] tag 不依賴 tag 在訊息哪個位置。
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n---\n\n{message}"
+        else:
+            full_prompt = message
+
+        cmd = [self.binary_path, "-z", full_prompt] + self.extra_args
 
         env = os.environ.copy()
-        if system_prompt:
-            # 嘗試用環境變數帶 system prompt（依 Hermes 實際支援的方式）
-            env["HERMES_SYSTEM_PROMPT"] = system_prompt
 
         logger.debug(f"執行: {' '.join(cmd[:3])}...")
 
