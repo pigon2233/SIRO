@@ -89,10 +89,10 @@ namespace Siro
             }
 
             _currentPersona = config;
-            if (verboseLogging) Debug.Log($"[PersonaManager] 套用 persona: {config.name} (id={config.id}, prefab={config.prefabPath})");
+            if (verboseLogging) Debug.Log($"[PersonaManager] 套用 persona: {config.name} (id={config.id}, prefab={config.prefab_path})");
 
             // 1. 動態載入新 prefab（如果需要）
-            if (!string.IsNullOrEmpty(config.prefabPath))
+            if (!string.IsNullOrEmpty(config.prefab_path))
             {
                 yield return _EnsureCharacterPrefab(config);
             }
@@ -105,8 +105,8 @@ namespace Siro
             if (modelController != null)
             {
                 modelController.SetQuirks(
-                    config.hideEyeOnExpressions,
-                    config.eyeDrawableIndices
+                    config.hide_eye_on_expressions,
+                    config.eye_drawable_indices
                 );
             }
 
@@ -124,14 +124,14 @@ namespace Siro
         {
             // 簡易實作：從 Resources/ 載入 prefab
             // v1.1+ 換 Addressables
-            if (verboseLogging) Debug.Log($"[PersonaManager] 載入 prefab: {config.prefabPath}");
+            if (verboseLogging) Debug.Log($"[PersonaManager] 載入 prefab: {config.prefab_path}");
 
             // Resources.Load 需要 path 不含副檔名
-            // prefabPath 範例："Live2D/Cubism/Samples/Models/Mao/Mao"
-            var loaded = Resources.Load<GameObject>(config.prefabPath);
+            // prefab_path 範例："Live2D/Cubism/Samples/Models/Mao/Mao"
+            var loaded = Resources.Load<GameObject>(config.prefab_path);
             if (loaded == null)
             {
-                Debug.LogError($"[PersonaManager] 找不到 prefab at Resources/{config.prefabPath}");
+                Debug.LogError($"[PersonaManager] 找不到 prefab at Resources/{config.prefab_path}");
                 yield break;
             }
 

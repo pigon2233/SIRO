@@ -7,6 +7,10 @@
 // - GET  /personas/{id}    → PersonaDetail（單一完整設定）
 //
 // 用 UnityWebRequest（非 async/await，避免跟 Unity 既有 code style 衝突）
+//
+// v1.1 fix：_Get 改回傳 raw string（不再泛型），JSON parse 移到 call site。
+// 原因：原本 `_Get<T>` 的 lambda 參數是 string，沒用到 T，
+// 編譯器 CS0411 推不出 T。
 
 using System;
 using System.Collections;
@@ -29,7 +33,11 @@ namespace Siro
         /// </summary>
         public void FetchPersonaList(Action<PersonaListResponse> onSuccess, Action<string> onError)
         {
-            StartCoroutine(_Get<PersonaListResponse>($"{bridgeBaseUrl}/personas", onSuccess, onError));
+            _Get($"{bridgeBaseUrl}/personas", (raw) =>
+            {
+                var resp = JsonUtility.FromJson<PersonaListResponse>(raw);
+                onSuccess?.Invoke(resp);
+            }, onError);
         }
 
         /// <summary>
@@ -37,26 +45,28 @@ namespace Siro
         /// </summary>
         public void FetchPersonaDetail(string personaId, Action<PersonaConfig> onSuccess, Action<string> onError)
         {
-            StartCoroutine(_Get($"{bridgeBaseUrl}/personas/{personaId}", (raw) =>
+            _Get($"{bridgeBaseUrl}/personas/{personaId}", (raw) =>
             {
                 if (string.IsNullOrEmpty(raw))
                 {
                     onError?.Invoke("Empty response from bridge");
                     return;
                 }
-                try
-                {
-                    var config = JsonUtility.FromJson<PersonaConfig>(raw);
-                    onSuccess?.Invoke(config);
-                }
-                catch (Exception e)
-                {
-                    onError?.Invoke($"JSON parse error: {e.Message}");
-                }
-            }, onError));
+                var config = JsonUtility.FromJson<PersonaConfig>(raw);
+                onSuccess?.Invoke(config);
+            }, onError);
         }
 
-        private IEnumerator _Get<T>(string url, Action<T> onSuccess, Action<string> onError) where T : class
+        /// <summary>
+        /// 內部 helper：抓 raw body 丟給 onSuccess，錯誤丟 onError。
+        /// 不泛型 — JSON parse 在 call site 各自處理。
+        /// </summary>
+        private void _Get(string url, Action<string> onSuccess, Action<string> onError)
+        {
+            StartCoroutine(_GetRoutine(url, onSuccess, onError));
+        }
+
+        private IEnumerator _GetRoutine(string url, Action<string> onSuccess, Action<string> onError)
         {
             if (verboseLogging) Debug.Log($"[PersonaApiClient] GET {url}");
 
@@ -76,12 +86,12 @@ namespace Siro
                 var body = req.downloadHandler.text;
                 try
                 {
-                    var parsed = JsonUtility.FromJson<T>(body);
-                    onSuccess?.Invoke(parsed);
+                    onSuccess?.Invoke(body);
                 }
                 catch (Exception e)
                 {
-                    onError?.Invoke($"JSON parse error: {e.Message} (body={body.Substring(0, Math.Min(200, body.Length))})");
+                    // 解析失敗時 log 原始 body 方便 debug
+                    onError?.Invoke($"Parse error: {e.Message} (body={(body ?? "").Substring(0, Math.Min(200, (body ?? "").Length))})");
                 }
             }
         }

@@ -3,7 +3,12 @@
 // v1+ 多角色架構：Persona runtime data 物件
 //
 // 對應 bridge 的 GET /personas/{id} 回應 schema (PersonaDetail)。
-// 用 [Serializable] 讓 Unity 也能反序列化 Inspector 設定的 ScriptableObject 備援。
+//
+// 注意：Unity 的 JsonUtility 不支援 attribute rename 機制（[JsonProperty]），
+// C# 欄位名要跟 JSON 欄位名**完全一致**。所以這邊刻意用 snake_case。
+// 私有欄位、外人看不到，醜一點但功能正常。
+//
+// v1.1 fix：把 JSON 欄位統一改成 snake_case 對齊 Python Pydantic schema。
 
 using System;
 using System.Collections.Generic;
@@ -14,20 +19,21 @@ namespace Siro
     [Serializable]
     public class PersonaConfig
     {
+        // ===== 基本識別 =====
         public string id;
         public string name;
         public string version;
         public string language;
 
-        [Header("Model")]
-        public string modelType;          // "cubism" 之類
-        public string prefabPath;         // Resources/Addressable 路徑
+        // ===== Model =====
+        public string model_type;          // "cubism" 之類
+        public string prefab_path;         // Resources/Addressable 路徑
 
-        [Header("Quirks")]
-        public string[] hideEyeOnExpressions = new string[0];
-        public int[] eyeDrawableIndices = new int[0];
+        // ===== Quirks =====
+        public string[] hide_eye_on_expressions = new string[0];
+        public int[] eye_drawable_indices = new int[0];
 
-        [Header("Emotion → Live2D signal")]
+        // ===== Emotion → Live2D signal（9 種）=====
         public Live2DExpressionConfig happy;
         public Live2DExpressionConfig joyful;
         public Live2DExpressionConfig proud;
@@ -38,9 +44,9 @@ namespace Siro
         public Live2DExpressionConfig thinking;
         public Live2DExpressionConfig neutral;
 
-        [Header("Idle")]
-        public string[] idleMotions = new string[0];
-        public int[] idleIntervalSeconds = new int[] { 15, 45 };
+        // ===== Idle =====
+        public string[] idle_motions = new string[0];
+        public int[] idle_interval_seconds = new int[] { 15, 45 };
 
         /// <summary>
         /// 拿某 emotion 對應的 Live2D signal config
@@ -100,7 +106,7 @@ namespace Siro
     public class PersonaListResponse
     {
         public PersonaSummary[] personas;
-        public string current_default;
+        public string current_default;  // Python 回的是 snake_case
     }
 
     [Serializable]
@@ -110,7 +116,7 @@ namespace Siro
         public string name;
         public string version;
         public string language;
-        public string model_type;
-        public string prefab_path;
+        public string model_type;     // 對齊 Python
+        public string prefab_path;    // 對齊 Python
     }
 }
