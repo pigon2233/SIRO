@@ -141,6 +141,13 @@ async def lifespan(app: FastAPI):
     state.parser = EmotionParser()
     logger.info("✓ 情緒解析器就緒")
 
+    # v0.2+：印出已註冊的路由（除錯用）
+    routes = sorted({f"{r.methods} {r.path}" if hasattr(r, 'methods') else f"  {r.path}"
+                     for r in app.routes if hasattr(r, 'path')})
+    logger.info(f"  已註冊路由 ({len(routes)} 條):")
+    for r in routes:
+        logger.info(f"    {r}")
+
     yield
 
     logger.info("🛑 SIRO Bridge 關閉")
