@@ -34,8 +34,9 @@ namespace Siro
         public bool hideDropdownByDefault = true;
         [Tooltip("選完 persona 後自動收合 dropdown")]
         public bool autoCollapseAfterSelect = true;
-        [Tooltip("settings 按鈕文字格式，{0} = persona name")]
-        public string settingsButtonFormat = "⚙ {0}";
+        [Tooltip("settings 按鈕文字格式，{0} = persona name\n" +
+                 "預設「角色：{0}」— 避免用 emoji/特殊符號，Noto Sans TC 不含")]
+        public string settingsButtonFormat = "角色:{0}";
 
         [Header("Debug")]
         public bool verboseLogging = true;

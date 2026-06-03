@@ -10,7 +10,7 @@
 ```
 進場景 → 自動套用 siro-default（Mao = SIRO）
         ↓
-點右上角齒輪「⚙ SIRO」
+點右上角「角色:SIRO」按鈕
         ↓
 展開 persona dropdown
         ↓
@@ -28,11 +28,11 @@
 4. **選單 → Tools → SIRO → Setup Persona Manager**
    - 自動建好 `SIROPersonaRoot` GameObject（含所有 component）
    - 自動接到現有的 HermesBridgeClient + Live2DModelController
-   - 自動加右上角齒輪按鈕 + dropdown
+   - 自動加右上角「角色:SIRO」按鈕 + dropdown
    - 場景自動儲存
 5. **進 Play 模式測試**
    - 應該看到 SIRO 的 Mao
-   - 右上角看到「⚙ SIRO」按鈕
+   - 右上角看到「角色:SIRO」按鈕
    - 點下去 → dropdown 展開
    - 選不同 persona（如果有的話）
 
@@ -49,8 +49,8 @@
 | `PersonaSelectorUI` | `SIROPersonaRoot` GameObject | apiClient / personaManager / dropdown / settingsToggleButton / settingsButtonLabel |
 
 UI 物件：
-- 一個 **Button**（右上角當齒輪）+ 內含 **TMP_Text**（顯示 `⚙ SIRO`）
-- 一個 **TMP_Dropdown**（預設隱藏、anchor 到齒輪下方）
+- 一個 **Button**（右上角當設定按鈕）+ 內含 **TMP_Text**（顯示 `角色:SIRO`）
+- 一個 **TMP_Dropdown**（預設隱藏、anchor 到按鈕下方）
 
 ## 加新角色
 
@@ -58,14 +58,14 @@ UI 物件：
 2. 把新 prefab 放 `Assets/Resources/Characters/新角色/新角色.prefab`
 3. **重啟 bridge**（讓新 persona YAML 被讀取）
 4. **重啟 Unity**（讓 Resources cache 更新）
-5. 進 Play 模式 → 點齒輪 → 應該看到新角色在清單裡
+5. 進 Play 模式 → 點「角色:SIRO」按鈕 → 應該看到新角色在清單裡
 
 ## 疑難排解
 
 | 問題 | 解法 |
 |---|---|
-| 齒輪按鈕沒出現 | 確認 `PersonaApiClient.FetchPersonaList` 成功 — 看 Console 有沒有 `[PersonaSelectorUI] 拿 persona 清單失敗` |
-| 只有 1 個 persona，齒輪自動隱藏 | 正常行為。加第二份 persona YAML 就有齒輪 |
+| 設定按鈕沒出現 | 確認 `PersonaApiClient.FetchPersonaList` 成功 — 看 Console 有沒有 `[PersonaSelectorUI] 拿 persona 清單失敗` |
+| 只有 1 個 persona，按鈕自動隱藏 | 正常行為。加第二份 persona YAML 就會顯示按鈕 |
 | dropdown 選完沒切角色 | 看 `[PersonaManager]` log，確認 `ApplyPersona` 有跑到 |
 | 切角色後 Mao 不見 / 變白色 | persona 的 `prefab_path` 寫錯 — 應該是 Resources 內的路徑（不含副檔名）|
 

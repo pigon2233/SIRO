@@ -169,7 +169,7 @@ namespace Siro.EditorTools
             labelRect.offsetMin = Vector2.zero;
             labelRect.offsetMax = Vector2.zero;
             var label = settingsLabelGo.GetComponent<TMP_Text>();
-            label.text = "⚙ ...";
+            label.text = "角色:...";
             label.alignment = TextAlignmentOptions.Center;
             label.fontSize = 16;
             label.color = Color.white;
