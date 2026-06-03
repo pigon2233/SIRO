@@ -94,12 +94,10 @@ namespace Siro
                         return;
                     }
 
-                    if (resp.personas.Length == 1)
-                    {
-                        // 只有一個 persona → 隱藏齒輪（根本沒得切）
-                        if (verboseLogging) Debug.Log($"[PersonaSelectorUI] 只有 1 個 persona，隱藏切換 UI");
-                        if (settingsToggleButton != null) settingsToggleButton.gameObject.SetActive(false);
-                    }
+                    // 不再自動隱藏「只有 1 個 persona」的情況 —
+                    // 就算只有一個，也讓使用者看到齒輪、知道可以點開看 persona 是誰
+                    // （Windows 也不會因為只接一個滑鼠就藏起設定按鈕）
+                    if (verboseLogging) Debug.Log($"[PersonaSelectorUI] 載入 {resp.personas.Length} 個 persona");
 
                     PopulateDropdown(resp.personas);
                 },
