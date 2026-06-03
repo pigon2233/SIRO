@@ -1,7 +1,7 @@
 """
-bridge/tests/test_runtime_client.py
+tests/bridge/test_runtime_client.py
 
-測試 v0 stub 模式的 RuntimeClient 行為。
+從 bridge/tests/ 搬過來 (Phase 1.75 — 統一放 tests/bridge/)
 """
 
 import pytest
@@ -99,11 +99,3 @@ class TestRuntimeClientSingleton:
 
         client = get_runtime_client()
         assert client.enabled is True
-
-
-class TestRuntimeClientStubRunnable:
-    """直接跑 runtime_client.py 的 __main__ 應該沒錯
-
-    注意：subprocess 測試在跟其他 test 一起跑時可能 flaky（test pollution），
-    所以這個 case 暫時拔掉。如果之後要做更嚴謹的 e2e 測試再補回來。
-    """

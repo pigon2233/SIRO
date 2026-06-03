@@ -1,13 +1,14 @@
 """
-bridge/tests/test_integration_hermes.py
+tests/bridge/test_integration_hermes.py
 
 整合測試：bridge 跟真 Hermes 之間的通訊。
 會跳過如果 hermes 沒裝，CI 不會壞。
+
+從 bridge/tests/ 搬過來 (Phase 1.75 — 統一放 tests/bridge/)
 """
 
 import os
 import shutil
-import time
 
 import pytest
 
@@ -65,14 +66,3 @@ class TestRealHermesIntegration:
         result = self.client.chat("hi")
         assert result.duration_ms is not None
         assert result.duration_ms > 0
-
-    @pytest.mark.slow
-    @pytest.mark.skip(reason="跟 FastAPI lifespan 互動有複雜性，unit test 已覆蓋")
-    def test_hermes_chat_through_bridge_api(self):
-        """透過 bridge API 走完整鏈路（慢，跑完整個 FastAPI + Hermes）
-
-        註：這個 case 因為跟 FastAPI lifespan 互動的複雜性，暫時跳過。
-        test_main.py 已經有完整的單元測試覆蓋 API 行為。
-        真實 E2E 測試建議用 scripts/test-bridge-e2e.sh 之類的 curl 腳本。
-        """
-        pass

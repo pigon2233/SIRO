@@ -146,10 +146,22 @@ def get_persona_quirks(name: str = "default") -> dict[str, Any]:
 
 # 舊 code 用 PERSONALITIES dict 直接取 — Phase 2 後可移除
 class _PersonalitiesShim:
-    """模擬 dict 行為，但實際從 YAML 讀。"""
-    def get(self, name: str, default: Optional[str] = None) -> str:
-        result = get_personality(name)
-        return result if result else (default or _HARDCODE_FALLBACK_PROMPT)
+    """模擬 dict 行為，但實際從 YAML 讀。
+
+    語意跟 dict.get 一致：
+    - key 存在且有 prompt → 回 prompt
+    - key 缺 / 壞 → 回 user default（若有），否則回 hardcode fallback
+    """
+    def get(self, name: str, default: Optional[str] = None) -> Optional[str]:
+        persona = load_persona(name)
+        if persona is not None:
+            prompt = persona.get("personality", {}).get("system_prompt", "")
+            if prompt:
+                return prompt
+        # 找不到 / 沒 prompt → 用 caller 給的 default，否則 hardcode
+        if default is not None:
+            return default
+        return _HARDCODE_FALLBACK_PROMPT
 
     def __getitem__(self, name: str) -> str:
         return get_personality(name)

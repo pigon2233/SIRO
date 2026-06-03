@@ -9,6 +9,7 @@ bridge/main.py - SIRO Bridge FastAPI 入口
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -145,7 +146,7 @@ app.add_middleware(
 
 # ==================== 端點 ====================
 
-def _make_fallback_response(
+async def _make_fallback_response(
     user_id: str,
     session_id: str,
     category: str,
@@ -164,12 +165,14 @@ def _make_fallback_response(
 
     Args:
         user_message: 使用者原文（給 soft fallback 讓 Ollama 看得懂問題）
+
+    Note: async 因為 Ollama HTTP 呼叫用 to_thread 跑，避免 block event loop。
     """
     if error_detail:
         logger.warning(f"降級回應觸發 [{category}]: {error_detail}")
 
-    # ---- 1. Soft fallback：試本地 Ollama ----
-    ollama_text, ollama_emotion = _try_ollama_fallback(
+    # ---- 1. Soft fallback：試本地 Ollama（async 不卡 event loop）----
+    ollama_text, ollama_emotion = await _try_ollama_fallback_async(
         user_message=user_message,
         persona_name=persona_name,
     )
@@ -224,7 +227,7 @@ def _try_ollama_fallback(
     persona_name: str,
 ) -> tuple[Optional[str], Optional[Emotion]]:
     """
-    嘗試用本地 Ollama 拿一條回應。
+    嘗試用本地 Ollama 拿一條回應（同步版，呼叫端記得包 to_thread）。
 
     Returns:
         (text, None) — Ollama 成功，回 text 給 caller
@@ -251,6 +254,28 @@ def _try_ollama_fallback(
         return None, None
 
     return result.output, None
+
+
+async def _try_ollama_fallback_async(
+    user_message: str,
+    persona_name: str,
+) -> tuple[Optional[str], Optional[Emotion]]:
+    """async 版 _try_ollama_fallback — Ollama HTTP call 用 to_thread 避免 block event loop"""
+    if state.ollama is None or not state.ollama.is_available():
+        return None, None
+
+    if not user_message.strip():
+        return None, None
+
+    try:
+        # 跑在 thread pool 裡 — Ollama HTTP 請求不會卡 event loop
+        text, _ = await asyncio.to_thread(
+            _try_ollama_fallback, user_message, persona_name
+        )
+        return text, None
+    except Exception as e:
+        logger.warning(f"Ollama async fallback 例外: {e}")
+        return None, None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -289,7 +314,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or f"{req.user_id}-{uuid.uuid4().hex[:8]}"
 
     if not state.hermes.is_available():
-        return _make_fallback_response(
+        return await _make_fallback_response(
             user_id=req.user_id,
             session_id=session_id,
             category="error",
@@ -313,15 +338,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     system_prompt = get_personality(persona_name)
 
-    # 呼叫 Hermes
-    result = state.hermes.chat(
+    # 呼叫 Hermes（用 to_thread 把 subprocess 跑在 thread pool，
+    # 這樣 FastAPI event loop 不會被 3-10 秒的 hermes call 卡住）
+    result = await asyncio.to_thread(
+        state.hermes.chat,
         message=user_message_with_context,
         system_prompt=system_prompt,
     )
 
     if not result.success:
         # 降級而非 502：使用者看到「嗯..."而不是「Internal Server Error」
-        return _make_fallback_response(
+        return await _make_fallback_response(
             user_id=req.user_id,
             session_id=session_id,
             category="error",
@@ -411,7 +438,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # 降級路徑：Hermes 不可用就直接走 fallback，省下 subprocess 開銷
                 if not state.hermes.is_available():
-                    fallback = _make_fallback_response(
+                    fallback = await _make_fallback_response(
                         user_id=user_id,
                         session_id=session_id,
                         category="disconnected",
@@ -440,14 +467,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 prompt_message = f"{history_context}\n\n使用者: {message}" if history_context else message
                 system_prompt = get_personality(personality)
 
-                result = state.hermes.chat(
+                # to_thread 把 hermes subprocess 跑在 thread pool，
+                # 這樣 FastAPI event loop 不被卡
+                result = await asyncio.to_thread(
+                    state.hermes.chat,
                     message=prompt_message,
                     system_prompt=system_prompt,
                 )
 
                 if not result.success:
                     # 降級而非 error event：Mao 切 thinking、講「嗯..."
-                    fallback = _make_fallback_response(
+                    fallback = await _make_fallback_response(
                         user_id=user_id,
                         session_id=session_id,
                         category="error",

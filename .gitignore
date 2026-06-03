@@ -15,7 +15,9 @@ build/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
+coverage_html/
 
 # ============ Environment & Secrets ============
 .env

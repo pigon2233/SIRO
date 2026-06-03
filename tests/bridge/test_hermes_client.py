@@ -1,5 +1,7 @@
 """
-bridge/tests/test_hermes_client.py
+tests/bridge/test_hermes_client.py
+
+從 bridge/tests/ 搬過來 (Phase 1.75 — 統一放 tests/bridge/)
 """
 
 import subprocess
