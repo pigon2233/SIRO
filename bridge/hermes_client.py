@@ -126,12 +126,18 @@ class HermesClient:
         return raw
 
     def get_version(self) -> Optional[str]:
-        """取得 hermes 版本字串"""
+        """取得 hermes 版本字串
+
+        注意：hermes --version 可能輸出含中文/emoji 的字串，
+        必須強制 UTF-8 解碼（不然 Windows 預設 cp950 會炸）。
+        """
         try:
             result = subprocess.run(
                 [self.binary_path, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
             )
             if result.returncode == 0:
