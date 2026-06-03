@@ -98,10 +98,14 @@ def _get_jieba():
             _boost_jieba_dict(jieba)
             _JIEBA = jieba
         except ImportError:
+            import sys
             logger.warning(
                 "jieba 沒裝，_fallback_keyword 退回 substring 匹配（會有 false positive 如「天氣」→ angry）。"
                 "pip install jieba 修正"
             )
+            # v1.1+：印出實際 Python + sys.path 方便診斷「哪個 Python 沒裝」
+            logger.warning(f"  Python: {sys.executable}")
+            logger.warning(f"  sys.path[0:3]: {sys.path[:3]}")
             _JIEBA = False  # 標記為不可用，避免重試
     return _JIEBA if _JIEBA else None
 

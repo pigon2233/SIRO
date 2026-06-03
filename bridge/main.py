@@ -583,6 +583,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 prompt_message = f"{history_context}\n\n使用者: {message}" if history_context else message
                 system_prompt = get_personality(personality)
 
+                # v1.1 timing log：跟 /chat 對齊
+                import time
+                t_ws_start = time.time()
+                t_ws_parser = 0.0
+                t_ws_parse = 0.0
+
                 # to_thread 把 hermes subprocess 跑在 thread pool，
                 # 這樣 FastAPI event loop 不被卡
                 result = await asyncio.to_thread(
@@ -611,12 +617,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     continue
 
+                t1 = time.time()
                 clean_text, emotion, intensity = parser.parse(
                     result.output, user_input=message
                 )
                 live2d_signal = parser.to_live2d_signal(emotion, intensity)
+                t_ws_parse = time.time() - t1
                 logger.info(
-                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
+                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value} "
+                    f"[⏱ hermes={(time.time()-t_ws_start)*1000:.0f}ms parse={t_ws_parse*1000:.0f}ms total={(time.time()-t_ws_start)*1000:.0f}ms]"
                 )
 
                 if session_id not in state.sessions:
