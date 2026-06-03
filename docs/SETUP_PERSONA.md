@@ -56,9 +56,12 @@ UI 物件：
 
 1. 寫一份 `bridge/personas/新角色.yaml`（參考 [docs/PERSONA.md](PERSONA.md)）
 2. 把新 prefab 放 `Assets/Resources/Characters/新角色/新角色.prefab`
-3. **重啟 bridge**（讓新 persona YAML 被讀取）
-4. **重啟 Unity**（讓 Resources cache 更新）
-5. 進 Play 模式 → 點「角色:SIRO」按鈕 → 應該看到新角色在清單裡
+3. 把 persona YAML 的 `prefab_path` 設成 `Characters/新角色/新角色`（**Resources 之後**的路徑，不含 `.prefab`）
+4. **重啟 bridge**（讓新 persona YAML 被讀取）
+5. **重啟 Unity**（讓 Resources cache 更新）
+6. 進 Play 模式 → 點「角色:SIRO」按鈕 → 應該看到新角色在清單裡
+
+> **siro-default 範例**：Mao 已經在 MainScene instantiate，所以 `prefab_path` 留空、沿用場景內 character。Manager 會自動套 quirks 到現有的 `Live2DModelController`。
 
 ## 疑難排解
 
