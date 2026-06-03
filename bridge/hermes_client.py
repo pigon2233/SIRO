@@ -36,16 +36,23 @@ class HermesClient:
     def __init__(
         self,
         binary_path: Optional[str] = None,
-        timeout: int = 60,
+        timeout: Optional[int] = None,
         extra_args: Optional[list[str]] = None,
     ):
         """
         Args:
             binary_path: hermes 二進位路徑。留空會自動找 PATH 或 ~/.local/bin/hermes
-            timeout: 單次對話 timeout（秒）
+            timeout: 單次對話 timeout（秒）。None 會從 SIRO_PRIMARY_LLM_TIMEOUT_SEC
+                     env 讀，預設 600 秒（10 分鐘）— timeout 觸發後由 bridge
+                     main.py 走 _make_fallback_response。
             extra_args: 額外的 hermes CLI 參數
         """
         self.binary_path = self._resolve_binary(binary_path)
+        if timeout is None:
+            try:
+                timeout = int(os.environ.get("SIRO_PRIMARY_LLM_TIMEOUT_SEC", "600"))
+            except (TypeError, ValueError):
+                timeout = 600
         self.timeout = timeout
         self.extra_args = extra_args or []
 

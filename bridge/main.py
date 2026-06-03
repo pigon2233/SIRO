@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .emotion_parser import EmotionParser
 from .hermes_client import HermesClient
+from .ollama_client import OllamaClient
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -65,6 +66,7 @@ class BridgeState:
 
     def __init__(self):
         self.hermes: HermesClient | None = None
+        self.ollama: OllamaClient | None = None
         self.parser: EmotionParser | None = None
         self.sessions: Dict[str, list[dict]] = {}  # session_id -> 對話歷史
 
@@ -78,15 +80,40 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 SIRO Bridge 啟動中...")
 
     # 初始化 Hermes client
+    # timeout 從 SIRO_PRIMARY_LLM_TIMEOUT_SEC 讀（hermes_client.py 內部 fallback 到 600s）
     state.hermes = HermesClient(
         binary_path=os.environ.get("HERMES_BIN_PATH"),
-        timeout=int(os.environ.get("HERMES_TIMEOUT", "60")),
     )
     if state.hermes.is_available():
         version = state.hermes.get_version()
         logger.info(f"✓ Hermes 可用: {version}")
     else:
         logger.warning("⚠ Hermes 不可用，請確認有跑過 agent/install.sh")
+
+    # 印出 LLM 路由設定 — 方便開機時一眼看到現在走哪台、timeout 多少、
+    # fallback 是哪台。Phase 1.5 驗收/排錯都靠這段日誌。
+    primary_model = os.environ.get("SIRO_PRIMARY_LLM_MODEL", "(未設定，Hermes 走預設)")
+    primary_base = os.environ.get("SIRO_PRIMARY_LLM_BASE_URL", "(未設定)")
+    primary_provider = os.environ.get("SIRO_PRIMARY_LLM_PROVIDER", "(未設定)")
+    api_key_set = bool(os.environ.get("SIRO_PRIMARY_LLM_API_KEY", ""))
+
+    logger.info("─" * 50)
+    logger.info(f"  Primary LLM provider : {primary_provider}")
+    logger.info(f"  Primary LLM model   : {primary_model}")
+    logger.info(f"  Primary LLM base_url: {primary_base}")
+    logger.info(f"  Primary API key 設定: {'✓' if api_key_set else '✗ 缺少 SIRO_PRIMARY_LLM_API_KEY'}")
+    logger.info(f"  Primary timeout      : {state.hermes.timeout}s")
+
+    # 初始化 fallback LLM（本地 Ollama）
+    state.ollama = OllamaClient()
+    if state.ollama.is_available():
+        logger.info(f"  Fallback LLM (Ollama): ✓ {state.ollama.model} @ {state.ollama.base_url}")
+    else:
+        logger.warning(
+            f"  Fallback LLM (Ollama): ✗ {state.ollama.model} @ {state.ollama.base_url} "
+            f"（Ollama 沒跑 → timeout 時會直接走 static persona 文字）"
+        )
+    logger.info("─" * 50)
 
     # 初始化情緒解析器
     state.parser = EmotionParser()
@@ -124,26 +151,63 @@ def _make_fallback_response(
     category: str,
     persona_name: str,
     error_detail: str = "",
+    user_message: str = "",
 ) -> ChatResponse:
     """
     產生降級回應 — Hermes 不可用 / 失敗時用。
 
-    回 200 + thinking 表情 + persona 的 fallback pool 文字，
-    這樣使用者端 Mao 看起來「在想」而不是「斷線」。
+    兩段式降級（GAPS.md #4 + #9）：
+    1. Soft fallback：試本地 Ollama llama3.2:3b（真的 LLM 回應，只是比較笨）
+    2. Hard fallback：拿 persona 靜態 fallback pool 文字 + thinking 表情
 
-    GAPS.md #4 + #9：離線降級策略 + 降級路徑 UX。
+    兩段都回 200 — 讓 Unity Mao 看起來「在想」而不是「斷線」。
+
+    Args:
+        user_message: 使用者原文（給 soft fallback 讓 Ollama 看得懂問題）
     """
-    fallback_text = get_fallback_response(category, persona_name=persona_name)
     if error_detail:
         logger.warning(f"降級回應觸發 [{category}]: {error_detail}")
 
-    # 用 EmotionParser 拿 thinking 對應的 Live2D signal（avoid hardcode）
+    # ---- 1. Soft fallback：試本地 Ollama ----
+    ollama_text, ollama_emotion = _try_ollama_fallback(
+        user_message=user_message,
+        persona_name=persona_name,
+    )
+    if ollama_text is not None:
+        # Ollama 給了真的回應 → 走正常 emotion parse
+        if state.parser is not None:
+            clean_text, emotion, intensity = state.parser.parse(
+                ollama_text, user_input=user_message
+            )
+            live2d = state.parser.to_live2d_signal(emotion, intensity)
+        else:
+            clean_text, emotion, intensity = ollama_text, Emotion.THINKING, 0.5
+            live2d = Live2DSignal(expression_id="exp_06", intensity=intensity)
+        logger.info(
+            f"↩ soft fallback (Ollama) user={user_message[:40]!r} → "
+            f"llm={ollama_text[:80]!r} → emotion={emotion.value}"
+        )
+        return ChatResponse(
+            text=clean_text,
+            emotion=emotion,
+            intensity=intensity,
+            live2d=live2d,
+            session_id=session_id,
+            user_id=user_id,
+            raw_response=ollama_text,
+        )
+
+    # ---- 2. Hard fallback：persona 靜態文字 + thinking 表情 ----
+    fallback_text = get_fallback_response(category, persona_name=persona_name)
     intensity = 0.5
     if state.parser is not None:
         live2d = state.parser.to_live2d_signal(Emotion.THINKING, intensity)
     else:
         live2d = Live2DSignal(expression_id="exp_06", intensity=intensity)
 
+    logger.info(
+        f"↩ hard fallback (static) user={user_message[:40]!r} → text={fallback_text!r}"
+    )
     return ChatResponse(
         text=fallback_text,
         emotion=Emotion.THINKING,
@@ -151,8 +215,42 @@ def _make_fallback_response(
         live2d=live2d,
         session_id=session_id,
         user_id=user_id,
-        raw_response=f"[bridge fallback: {category}] {error_detail}",
+        raw_response=f"[bridge hard fallback: {category}] {error_detail}",
     )
+
+
+def _try_ollama_fallback(
+    user_message: str,
+    persona_name: str,
+) -> tuple[Optional[str], Optional[Emotion]]:
+    """
+    嘗試用本地 Ollama 拿一條回應。
+
+    Returns:
+        (text, None) — Ollama 成功，回 text 給 caller
+        (None, None) — Ollama 不可用 / 失敗 / 沒訊息，caller 走 hard fallback
+    """
+    if state.ollama is None or not state.ollama.is_available():
+        return None, None
+
+    if not user_message.strip():
+        return None, None
+
+    try:
+        system_prompt = get_personality(persona_name)
+        result = state.ollama.chat(
+            message=user_message,
+            system_prompt=system_prompt,
+        )
+    except Exception as e:
+        logger.warning(f"Ollama fallback 例外: {e}")
+        return None, None
+
+    if not result.success or not result.output:
+        logger.warning(f"Ollama fallback 失敗: {result.error}")
+        return None, None
+
+    return result.output, None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -197,6 +295,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             category="error",
             persona_name=persona_name,
             error_detail="Hermes CLI not available",
+            user_message=req.message,
         )
 
     # 載入對話歷史（簡化版：塞進 prompt 上下文）
@@ -228,6 +327,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             category="error",
             persona_name=persona_name,
             error_detail=f"Hermes failed: {result.error}",
+            user_message=req.message,
         )
 
     # 解析情緒（傳 user_input 讓 parser 對明確情緒詞做強信號 override）
@@ -317,6 +417,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         category="disconnected",
                         persona_name=personality,
                         error_detail="Hermes not available",
+                        user_message=message,
                     )
                     await websocket.send_json({
                         "type": "response",
@@ -352,6 +453,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         category="error",
                         persona_name=personality,
                         error_detail=f"Hermes failed: {result.error}",
+                        user_message=message,
                     )
                     await websocket.send_json({
                         "type": "response",
