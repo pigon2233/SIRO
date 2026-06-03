@@ -81,19 +81,38 @@ class BridgeState:
         self.ollama: OllamaClient | None = None
         self.parser: EmotionParser | None = None
         self.sessions: Dict[str, list[dict]] = {}  # session_id -> 對話歷史
+        # v0.2+：per-persona parser cache — 同一 persona 重複 request 不重建 parser
+        # EmotionParser.__init__ 雖然便宜，但 jieba 詞庫補強在第一次會跑 16 次 add_word
+        # cache 起來省下這些 + dict copy
+        self.parser_cache: Dict[str, EmotionParser] = {}
 
 
 state = BridgeState()
 
 
 def _build_parser_for_persona(persona_name: str) -> EmotionParser:
-    """依 persona 名字建一個配好 expressions 的 EmotionParser
+    """依 persona 名字拿一個配好 expressions 的 EmotionParser
 
     v0.2+：emotion_mapping.json 已併入 persona，parser 從 persona["model"]["expressions"]
-    拿設定。換 persona 就重建一個（dict copy 很便宜）。
+    拿設定。
+
+    v1.1+：用 state.parser_cache cache 起來，同一 persona 重複 request
+    不重建 parser。第一次會建，之後直接 dict lookup。
+
+    換 persona 才會建新 parser（cache 命中或換 key 都 O(1)）。
     """
-    expressions = get_persona_expressions(persona_name)
-    return EmotionParser(persona_expressions=expressions)
+    # alias：default / "" 都對應 siro-default
+    cache_key = persona_name if persona_name else "siro-default"
+    if persona_name in ("default", "", None):
+        cache_key = "siro-default"
+
+    if cache_key in state.parser_cache:
+        return state.parser_cache[cache_key]
+
+    expressions = get_persona_expressions(cache_key)
+    parser = EmotionParser(persona_expressions=expressions)
+    state.parser_cache[cache_key] = parser
+    return parser
 
 
 @asynccontextmanager
@@ -389,8 +408,17 @@ async def chat(req: ChatRequest) -> ChatResponse:
     persona_name = req.personality or "default"
     session_id = req.session_id or f"{req.user_id}-{uuid.uuid4().hex[:8]}"
 
+    # v1.1 timing log：分段計時方便看哪裡慢
+    import time
+    t_total_start = time.time()
+    t_parser = 0.0
+    t_hermes = 0.0
+    t_parse = 0.0
+
     # v0.2+：每個 request 依 persona 拿專屬的 EmotionParser（從 persona 讀 expressions）
+    t0 = time.time()
     parser = _build_parser_for_persona(persona_name)
+    t_parser = time.time() - t0
 
     if not state.hermes.is_available():
         return await _make_fallback_response(
@@ -436,13 +464,19 @@ async def chat(req: ChatRequest) -> ChatResponse:
             user_message=req.message,
         )
 
+    t_hermes = time.time() - t_parser + t0  # 含前面的 parser 時間
+    t_hermes_only = time.time() - t0 - t_parser  # 純 hermes
+
     # 解析情緒（用 persona 專屬 parser，user_input 對明確情緒詞做強信號 override）
+    t1 = time.time()
     clean_text, emotion, intensity = parser.parse(
         result.output, user_input=req.message
     )
     live2d_signal = parser.to_live2d_signal(emotion, intensity)
+    t_parse = time.time() - t1
     logger.info(
-        f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}"
+        f"💬 user={req.message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value} "
+        f"[⏱ parser={t_parser*1000:.0f}ms hermes={t_hermes_only*1000:.0f}ms parse={t_parse*1000:.0f}ms total={(time.time()-t_total_start)*1000:.0f}ms]"
     )
 
     # 記錄歷史

@@ -422,9 +422,10 @@ class TestPersonasList:
         r = client.get("/personas")
         data = r.json()
         siro = next(p for p in data["personas"] if p["id"] == "siro-default")
-        # PersonaSummary 應含 model_type / prefab_path
+        # PersonaSummary 應含 model_type
+        # prefab_path：siro-default 是空字串（沿用場景內 character），其他 persona 才會填
         assert siro["model_type"] == "cubism"
-        assert "Mao" in (siro.get("prefab_path") or "")
+        assert siro.get("prefab_path") == ""  # siro-default 沒指定 prefab
 
 
 class TestPersonaDetail:
