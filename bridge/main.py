@@ -47,6 +47,7 @@ from .models import (
     PersonaSummary,
     PersonaDetail,
     PersonaListResponse,
+    VisualSettings,
 )
 from .prompts import (
     get_personality,
@@ -54,6 +55,7 @@ from .prompts import (
     get_persona_expressions,
     get_persona_model_meta,
     get_persona_quirks,
+    get_persona_visual,
     list_personas,
     load_persona,
 )
@@ -427,6 +429,7 @@ async def get_persona_detail(persona_id: str) -> PersonaDetail:
     model_meta = get_persona_model_meta(persona_id)
     quirks = get_persona_quirks(persona_id)
     expressions = get_persona_expressions(persona_id)
+    visual_raw = get_persona_visual(persona_id)
 
     return PersonaDetail(
         id=persona.get("id", persona_id),
@@ -440,6 +443,7 @@ async def get_persona_detail(persona_id: str) -> PersonaDetail:
         expressions=expressions,
         idle_motions=persona.get("idle_motions", []),
         idle_interval_seconds=persona.get("idle_interval_seconds", [15, 45]),
+        visual=VisualSettings(**visual_raw),
     )
 
 

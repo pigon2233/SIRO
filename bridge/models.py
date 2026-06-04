@@ -67,8 +67,37 @@ class PersonaSummary(BaseModel):
     prefab_path: Optional[str] = None
 
 
+class VisualPosition(BaseModel):
+    """視覺錨點偏移（normalized，-1.0 ~ 1.0）
+
+    對應 Unity RectTransform.anchoredPosition（normalized）：
+    - x: -1.0 (螢幕最左) ~ 1.0 (螢幕最右)
+    - y: -1.0 (螢幕最下) ~ 1.0 (螢幕最上)
+    """
+    x: float = Field(0.0, ge=-1.0, le=1.0)
+    y: float = Field(0.0, ge=-1.0, le=1.0)
+
+
+class VisualSettings(BaseModel):
+    """v0.3+ 視覺設定檔（per-persona）
+
+    Unity 啟動時 /personas/{id} 拿這份直接套用 transform/canvas。
+    全部都有合理 default — 沒寫 YAML 也照跑。
+    """
+    scale: float = Field(1.0, ge=0.3, le=3.0, description="角色縮放 0.3-3.0 倍")
+    position: VisualPosition = Field(default_factory=VisualPosition)
+    anchor: str = Field(
+        "bottom-center",
+        description="9-grid 錨點：top-left/top-center/top-right/middle-left/center/middle-right/bottom-left/bottom-center/bottom-right",
+    )
+    brightness: float = Field(1.0, ge=0.3, le=1.5, description="整體亮度倍率 0.3-1.5")
+    opacity: float = Field(1.0, ge=0.0, le=1.0, description="透明度 0.0-1.0")
+    mirror: bool = Field(False, description="左右鏡像")
+    z_order: int = Field(0, ge=-100, le=100, description="Canvas sortOrder")
+
+
 class PersonaDetail(PersonaSummary):
-    """Persona 完整資料（含 Live2D signal 設定、quirks）"""
+    """Persona 完整資料（含 Live2D signal 設定、quirks、視覺設定檔）"""
     # quirks
     hide_eye_on_expressions: list[str] = Field(default_factory=list)
     eye_drawable_indices: list[int] = Field(default_factory=list)
@@ -77,6 +106,8 @@ class PersonaDetail(PersonaSummary):
     # 待機動作
     idle_motions: list[str] = Field(default_factory=list)
     idle_interval_seconds: list[int] = Field(default_factory=list)
+    # v0.3+ 視覺設定檔（scale/position/anchor/brightness/opacity/mirror/z_order）
+    visual: VisualSettings = Field(default_factory=VisualSettings)
 
 
 class PersonaListResponse(BaseModel):

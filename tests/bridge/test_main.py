@@ -485,6 +485,92 @@ class TestPersonaDetail:
         r = client.get("/personas/totally-fake-xyz")
         assert r.status_code == 404
 
+    def test_siro_default_detail_has_visual_settings(
+        self, client, mock_hermes, mock_ollama_available, real_parser
+    ):
+        """v0.3+：/personas/{id} 必須回 visual 區塊（Unity 啟動讀）"""
+        r = client.get("/personas/siro-default")
+        data = r.json()
+        assert "visual" in data, "PersonaDetail 缺 visual 區塊"
+        v = data["visual"]
+        # siro-default.yaml 寫的 visual 區塊
+        assert v["scale"] == 1.0
+        assert v["position"] == {"x": 0.0, "y": 0.0}
+        assert v["anchor"] == "bottom-center"
+        assert v["brightness"] == 1.0
+        assert v["opacity"] == 1.0
+        assert v["mirror"] is False
+        assert v["z_order"] == 0
+
+    def test_visual_settings_pydantic_validates_ranges(
+        self, client, mock_hermes, mock_ollama_available, real_parser
+    ):
+        """Pydantic 必須擋掉越界值（Unity 不會收到 garbage）"""
+        from pydantic import ValidationError
+        from bridge.models import VisualSettings, VisualPosition
+
+        # scale 越界 → ValidationError
+        with pytest.raises(ValidationError):
+            VisualSettings(scale=10.0)  # > 3.0
+        with pytest.raises(ValidationError):
+            VisualSettings(scale=0.05)  # < 0.3
+
+        # position 越界 → ValidationError
+        with pytest.raises(ValidationError):
+            VisualPosition(x=1.5)  # > 1.0
+        with pytest.raises(ValidationError):
+            VisualPosition(y=-2.0)  # < -1.0
+
+        # brightness 越界
+        with pytest.raises(ValidationError):
+            VisualSettings(brightness=2.0)  # > 1.5
+        with pytest.raises(ValidationError):
+            VisualSettings(brightness=0.1)  # < 0.3
+
+        # opacity 越界
+        with pytest.raises(ValidationError):
+            VisualSettings(opacity=1.5)  # > 1.0
+        with pytest.raises(ValidationError):
+            VisualSettings(opacity=-0.1)  # < 0.0
+
+    def test_visual_settings_partial_yaml_uses_defaults(
+        self, client, mock_hermes, mock_ollama_available, real_parser, tmp_path, monkeypatch
+    ):
+        """只寫部分 visual 欄位 → 其他用 default（partial 設定要 work）"""
+        from bridge.prompts import get_persona_visual
+        from bridge import prompts as prompts_mod
+
+        # 建一份只有 scale 的 persona YAML
+        partial_yaml = tmp_path / "partial.yaml"
+        partial_yaml.write_text("""
+id: partial-test
+name: Partial Test
+model:
+  visual:
+    scale: 1.5
+    opacity: 0.5
+""", encoding="utf-8")
+        # monkeypatch load_persona 暫時換掉
+        from bridge.prompts import load_persona as orig_load
+        def fake_load(name):
+            if name == "partial-test":
+                import yaml
+                with open(partial_yaml, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f)
+            return orig_load(name)
+        monkeypatch.setattr(prompts_mod, "load_persona", fake_load)
+
+        v = get_persona_visual("partial-test")
+        # 寫了的
+        assert v["scale"] == 1.5
+        assert v["opacity"] == 0.5
+        # 沒寫的要用 default
+        assert v["anchor"] == "bottom-center"
+        assert v["brightness"] == 1.0
+        assert v["mirror"] is False
+        assert v["z_order"] == 0
+        assert v["position"] == {"x": 0.0, "y": 0.0}
+
 
 # ==================== /chat 用 persona 切換（v0.2 整合測試）====================
 

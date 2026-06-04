@@ -210,6 +210,54 @@ def get_persona_model_meta(name: str = "default") -> dict[str, Any]:
     }
 
 
+def get_persona_visual(name: str = "default") -> dict[str, Any]:
+    """
+    取得 persona 的視覺設定檔（v0.3+ 視覺設定檔項目）
+
+    給 Unity 啟動時套用 transform / canvas 設定用：
+    - scale: 角色大小倍率
+    - position: 錨點偏移（normalized -1~1）
+    - anchor: 9-grid 錨點
+    - brightness: 整體亮度
+    - opacity: 透明度
+    - mirror: 左右鏡像
+    - z_order: Canvas sortOrder
+
+    全部都有 default — 沒寫 YAML 也照跑，Unity 端不用判斷 None。
+
+    Returns:
+        dict 形如 {"scale":1.0,"position":{"x":0.0,"y":0.0},"anchor":"bottom-center",...}，
+        找不到 persona 回預設值（跟 VisualSettings 對齊）
+    """
+    persona = load_persona(name)
+    if persona is None:
+        return {
+            "scale": 1.0,
+            "position": {"x": 0.0, "y": 0.0},
+            "anchor": "bottom-center",
+            "brightness": 1.0,
+            "opacity": 1.0,
+            "mirror": False,
+            "z_order": 0,
+        }
+    visual = persona.get("model", {}).get("visual", {})
+    # 合併 default：寫了什麼用什麼、沒寫用 default
+    defaults = {
+        "scale": 1.0,
+        "position": {"x": 0.0, "y": 0.0},
+        "anchor": "bottom-center",
+        "brightness": 1.0,
+        "opacity": 1.0,
+        "mirror": False,
+        "z_order": 0,
+    }
+    merged = {**defaults, **visual}
+    # position 內部也要 merge（partial 寫 position 也要 work）
+    if "position" in visual and isinstance(visual["position"], dict):
+        merged["position"] = {**defaults["position"], **visual["position"]}
+    return merged
+
+
 # ============ 向後相容 ============
 
 # 舊 code 用 PERSONALITIES dict 直接取 — Phase 2 後可移除

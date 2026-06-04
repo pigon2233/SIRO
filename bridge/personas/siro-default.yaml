@@ -97,6 +97,21 @@ model:
       intensity: 0.5
       duration_ms: 500
 
+  # ============ 視覺設定檔 (v0.3+) ============
+  # Unity 啟動時 /personas/{id} 拿這份直接套用 transform / canvas
+  # 全部 optional — 沒寫用 default，舊 persona YAML 不破壞
+  # 想換角色大小/位置/亮度/鏡像：改這邊、重啟 Unity，不用動程式碼
+  visual:
+    scale: 1.0           # 角色大小 0.3-3.0 倍
+    position:            # 錨點偏移（normalized，-1.0 ~ 1.0）
+      x: 0.0             # 0 = 中心、-1 = 螢幕最左、1 = 螢幕最右
+      y: 0.0             # 0 = 中心、-1 = 螢幕最下、1 = 螢幕最上
+    anchor: bottom-center  # 9-grid：top-left/top-center/top-right/middle-*/center/bottom-*
+    brightness: 1.0     # 0.3 (暗) - 1.5 (亮)
+    opacity: 1.0        # 0.0 (透明) - 1.0 (不透明)
+    mirror: false       # 左右鏡像
+    z_order: 0          # Canvas sortOrder
+
 # ============ 待機動作 (Phase 2 用) ============
 idle_motions: []   # Phase 2 補
 idle_interval_seconds: [15, 45]
