@@ -99,3 +99,55 @@ PLAN_REVIEW_v0.3.md（2026-06-04 修訂）已對齊 A 案，把本檔 Q2 結論�
 - 真的做 hermes streaming 介面評估的結果
 - B (hermes 介面) 路線圖細節
 - C/D (接受現狀 / 換模型) 決策依據
+
+---
+
+## 相關文件 cross-reference
+
+本檔是「決策快照」，相關細節在以下文件：
+
+| 本檔 | 對應文件 | 對應章節 |
+|------|----------|----------|
+| Q1 Rust 改寫 | [ARCHITECTURE.md](ARCHITECTURE.md) | §1.1 4 層架構（Layer 3 Rust / Layer 4 Linux）|
+| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #2 Rust 邊界沒講清楚 🟠 |
+| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #11 「OS」定義模糊 🟡 |
+| Q2 Streaming | [DECISIONS.md](DECISIONS.md) | 決策 #001「為什麼用 Hermes Agent」v0.2 觀察段 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #1 Streaming 整個漏掉 🔴 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #5 雲端 LLM 廠商鎖定 🟠 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #4 TTFT / KPI 沒量化 🟠 |
+| v0.3 進度 | [STATUS.md](STATUS.md) | 版本演進段（v0.2 → v0.3）|
+| v0.3 進度 | [AGENT_OS.md](AGENT_OS.md) | 範圍演進段（v0.3 接到 /chat）|
+| v0.3 進度 | [ARCHITECTURE.md](ARCHITECTURE.md) | v0.3 範圍對照表 |
+| v0.3 進度 | [SETUP.md](SETUP.md) | §9 KPI 驗收（K1 K2 K4 K5 K7 K8 K10）|
+
+### 決策追溯鏈
+
+使用者原始決策 → 本檔 → 對應文件：
+
+```
+2026-06-02 決策 #001 選 Hermes
+  → 2026-06-04 v0.2 實作發現 streaming 限制
+    → 2026-06-04 本檔 Q2 結論：走 hermes 介面 streaming
+      → 2026-06-04 commit 7aa135b STRATEGIC_NOTES Q2 改結論
+      → 2026-06-04 commit f5d795e DECISIONS #001 加 v0.2 觀察
+      → 2026-06-04 commit 8936d54 PLAN_REVISION_v2.1 修訂（15 項含 #1 Streaming 漏掉）
+      → 2026-06-04 commit 8ffa8f0 SETUP.md §9 KPI 驗收（K2 包含 streaming latency）
+
+2026-06-02 決策 Q1 Rust 改寫
+  → 2026-06-04 本檔 Q1 結論：Phase 3+ 才做
+    → 2026-06-04 commit 9e21653 ARCHITECTURE v0.3 標頭（Layer 3 標 Phase 3+）
+    → 2026-06-04 commit 8936d54 PLAN_REVISION_v2.1 修訂（#2 Rust 邊界）
+    → v0.3 不實作、留到 Phase 3+
+```
+
+### 為什麼要 cross-ref
+
+1. **決策不再孤立**：未來想改某個決策時，先看其他文件有沒有引用、會不會影響別處
+2. **commit 追溯**：每個決策都有具體 commit hash、可 git log 看完整脈絡
+3. **避免決策飄移**：Q2 結論在 STRATEGIC_NOTES / DECISIONS / PLAN_REVISION / SETUP 四份文件都同步過、單一改動會被其他文件的 reviewer 抓出來
+
+### cross-ref 維護責任
+
+- 任何**新決策**加到本檔 → 必須同步更新 DECISIONS.md（如果該決策有 #001 那種「為什麼」的價值）
+- 任何**重大結論改變**（像 Q2 從「繞過」改「不繞過」）→ 必須走完整追溯鏈：STRATEGIC_NOTES + DECISIONS + PLAN_REVISION + SETUP KPI 一起更新
+- 任何**commit** 涉及決策 → commit message 引用 STRATEGIC_NOTES 段落、方便未來 `git log --grep`
