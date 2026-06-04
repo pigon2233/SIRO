@@ -294,3 +294,34 @@ Cubism SDK 沒裝好。回 Step 5.3。
 - 加更多 expression/motion：見 [unity/README.md](../unity/README.md)
 
 完整 roadmap 見 [../LIVE2D_AI_AGENT_OS_PLAN.md](../LIVE2D_AI_AGENT_OS_PLAN.md)。
+
+---
+
+## 9. KPI 驗收（v0.3 範圍）
+
+> 從 [PLAN.md §成功指標](../LIVE2D_AI_AGENT_OS_PLAN.md#成功指標-kpi) K1-K10 挑出 v0.3 範圍內的 7 個。
+> 每個 KPI 都附「驗證命令」— 跑過去就代表達標，不用靠「看起來能用」。
+
+| # | 面向 | 指標 | 目標 | 驗證命令 |
+|---|------|------|------|----------|
+| **K1** | 啟動 | 開機到對話就緒 | < 30 秒 | `time (sleep 5 && curl -X POST localhost:8001/chat -H "Content-Type: application/json" -d '{"message":"hi","user_id":"k1"}' 2>/dev/null)`（看 total 時間）|
+| **K2** | 反應 | 使用者輸入 → 角色回應 | < 5 秒（雲端 MiniMax-M3）| 5 輪對話取平均：`for i in 1..5; do time curl -X POST localhost:8001/chat -H "Content-Type: application/json" -d "{\"message\":\"回合 $i\",\"user_id\":\"k2\"}"; done` — bridge log 會印 `total=Xms` 看 X < 5000 |
+| **K4** | 記憶 | session 內記得前文 | 當前 session 內 | `python -m pytest tests/bridge/test_main.py::TestChatSuccess::test_chat_preserves_history_in_subsequent_calls tests/bridge/test_main.py::TestChatSuccess::test_chat_session_id_reuse -v`（確認 session 寫入 + 跨 turn 帶歷史）|
+| **K5** | 表情 | 表情切換延遲 | < 200ms | Unity Play 模式：按 Send、Console 看 `[EmotionDisplay] 切換 → F02 花了 Xms`，X < 200 |
+| **K7** | 隱私 | 預設資料外洩風險 | 0（無雲端 default）| `git log --all --diff-filter=A -- .env` 應該空 + `cat .env.example` 看預設值（應該是 hermes 本地 / Ollama）|
+| **K8** | 降級 | 子系統失敗時角色保持「在線」 | < 3 秒切 fallback | `python -m pytest tests/bridge/test_main.py::TestChatFallback -v` — 應該看到 hermes 模擬失敗 → 3 秒內回 persona fallback |
+| **K10** | 測試 | bridge 覆蓋率 | ≥ 80% | `python -m pytest tests/bridge/ --cov=bridge --cov-report=term` — 看 `TOTAL` 行 ≥ 80 |
+
+### 範圍外（v0.3 不驗收）
+
+- **K3** 穩定 7 天 — Phase 4 才驗收
+- **K6** TTS — v0.3 沒做語音輸出
+- **K9** 通用易用 — v2 才使用者測試
+
+### v0.3 專屬驗證（不在 K1-K10 內但很重要）
+
+| 項目 | 驗證命令 |
+|---|---|
+| AgentOS 接到 /chat（opt-in）| `SIRO_USE_AGENT_OS=true python -m bridge.main`，看啟動 log 有「`/chat 走 AgentOS: True`」，發 /chat 看 `💬 ... → via=AgentOS` |
+| AgentOS 預設走 v0.2 | 沒設 env，bridge 啟動 log 是「`/chat 走 AgentOS: False`」 |
+| AgentOS 整合測試 | `python -m pytest tests/bridge/test_agent_os_integration.py -v` 4/4 過 |
