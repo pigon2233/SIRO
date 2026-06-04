@@ -35,7 +35,7 @@ namespace Siro
         [Tooltip("Hit area name — 對應 Live2DModelController.OnMaoClicked 傳入的字串")]
         public string area;
 
-        [Tooltip("要觸發的 task name（"mood.set" / "motion.play" / "chat.say" 等）")]
+        [Tooltip(@"要觸發的 task name（mood.set / motion.play / chat.say 等）")]
         public string task;
 
         [Tooltip("task 的 args、會序列化成 JObject 傳給 SendTaskAsync")]
