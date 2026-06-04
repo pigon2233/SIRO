@@ -2,9 +2,22 @@
 
 ## 完整開發計畫書
 
-> **版本**：v2.0（2026-06-02 重構）
+> **版本**：v3.0（2026-06-04 對齊 v0.3 實況）
 > **目標讀者**：本計畫書是給**人類與 AI 協作開發**用的規格文件，每個 Phase 都有明確的交付物、驗收條件、可委派的工作項目。
-> **狀態**：Phase 0 進行中、**Phase 1 ✅ 完成**（2026-06-03 含 Unity Play 實測），其餘為規劃
+> **狀態**（2026-06-04）：
+> - ✅ Phase 0 完成（所有文件就位）
+> - ✅ Phase 1 完成（2026-06-03 Unity Play 實測）
+> - ✅ Phase 1.5 / 1.75 完成（runtime 驗收過）
+> - 🟡 **Phase 2 進行中** — v0.3 完成（AgentOS 接到 /chat /ws + SSE streaming 基礎建設）
+> - ⏳ Phase 3 / 4 / 5 / 6 為規劃
+> - **v0.3.1 進度**：選 Q2 選項 B（hermes_client streaming shim 實作完、Unity 端 incremental render 待 v1+）
+
+> **重要 cross-ref**：
+> - 階段細節：見各 Phase section（下方）
+> - **v0.x 進度子版本**：見本檔「§5.5 v0.x 進度子表」（v0.2 / v0.3 / v0.3.1 詳細狀態）
+> - 修訂記錄：`docs/PLAN_REVIEW_v0.3.md` + `docs/PLAN_REVISION_v2.1.md`（v0.3 期間的修訂歷史）
+> - KPI 驗收：`docs/SETUP.md` §9（K1-K7 對應 v0.3 範圍）
+> - 戰略決策：`docs/STRATEGIC_NOTES.md`（Q1 Rust、Q2 streaming + cross-reference 段）
 
 ---
 
@@ -257,30 +270,30 @@
 
 ## 5. 階段規劃
 
-### Phase 0: 規劃與環境建立 ✅ 進行中
+### Phase 0: 規劃與環境建立 ✅ 完成
 
 **目標**：完成架構設計、建立 monorepo 結構、定下所有技術選型
 
-**交付物**：
-- [x] 主計畫書（本檔）
-- [ ] `docs/ARCHITECTURE.md`（介面契約、資料流）
-- [ ] `docs/DECISIONS.md`（所有重大決策 ADR）
-- [ ] `os-runtime/` Rust workspace scaffold
-- [ ] `os/` Linux 設定目錄結構
-- [ ] `hardware/` 硬體規格文件
-- [ ] `docs/SECURITY.md`
-- [ ] `docs/DEPLOYMENT.md`
-- [ ] `docs/API.md`
-- [ ] `docs/TESTING.md`
-- [ ] `docs/CONTRIBUTING.md`
-- [ ] `scripts/dev/` 開發輔助腳本
+**交付物**（2026-06-04 對齊）：
+- [x] 主計畫書（本檔，v3.0）
+- [x] `docs/ARCHITECTURE.md`（v0.3 對齊、4 層架構、Layer 2 加 AgentOS + SSE streaming）
+- [x] `docs/DECISIONS.md`（19 個決策 + #001 v0.2 streaming 觀察）
+- [x] `os-runtime/` Rust workspace scaffold（Cargo.toml + crates + proto，**功能實作留 Phase 3**）
+- [x] `os/` Linux 設定目錄結構（10 子目錄、kiosk/systemd/monitoring/backup/security 有詳細規劃）
+- [x] `hardware/` 硬體規格文件（assembly/audio/video/detection + 自動驗證腳本）
+- [x] `docs/SECURITY.md`（v0.3 隱私路線圖）
+- [x] `docs/DEPLOYMENT.md`（Phase 4+ 部署指南）
+- [x] `docs/API.md`（bridge API 規格）
+- [x] `docs/TESTING.md`（測試 SOP）
+- [x] `docs/CONTRIBUTING.md`
+- [ ] `scripts/dev/` 開發輔助腳本（目前只有 `scripts/build-docs-html.py`、缺統一 dev helpers）
 
 **驗收條件**：
-- 所有文件互引一致
-- `os-runtime/` 可以 `cargo build` 通過
-- `bridge/` 可以 `python -m bridge.main` 啟動
+- [x] 所有文件互引一致（v0.3 期間修訂過 PLAN_REVIEW / PLAN_REVISION / SETUP / ARCHITECTURE / STATUS / AGENT_OS / DECISIONS / STRATEGIC_NOTES）
+- [ ] `os-runtime/` 可以 `cargo build` 通過（**待 Phase 3**、scaffold 在但實作沒做）
+- [x] `bridge/` 可以 `python -m bridge.main` 啟動（v0.2+ 實測）
 
-**預估時間**：1-2 週（剩餘）
+**預估時間**：~1 週（v0.3 期間多次修訂）
 **依賴**：無
 **風險**：低
 
@@ -397,9 +410,9 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 ---
 
-### Phase 2: 視覺呈現強化 (Unity + Live2D)
+### Phase 2: 視覺呈現強化 (Unity + Live2D) — 🟡 進行中（v0.3.1）
 
-**目標**：完善 Live2D 互動體驗，加上視覺效果
+**目標**：完善 Live2D 互動體驗、加上視覺效果、把 bridge 升級成「後台作業系統」
 
 **GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
 - **#10 i18n**：UI 字串抽到 `i18n/zh-TW.json`，為未來換 Persona 換語言鋪路
@@ -412,28 +425,48 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - Loading 狀態視覺（接續 Phase 1.5 的「連線中...」做更細）
 - 多個 Mao motion（idle, tap head, tap body）
 - UI 字串抽出（i18n 基礎）
+- **bridge 升級成後台作業系統（AgentOS）** — v0.2 骨架 / v0.3 接到 /chat /ws
+- **SSE streaming 基礎建設** — v0.3.1 選項 B（MiniMaxStreamingClient）
 
-**交付物**：
-- [ ] `Live2DModelController` 支援 motion 播放（含 Animator 設定 SOP）
-- [ ] `EmotionDisplay` 支援表情過渡動畫
-- [ ] 待機動作自動 loop + 跟 EyeBlinkController 共存（眨眼週期 4-7s）
-- [ ] 視覺設定檔（亮度、縮放）— 寫進 Persona YAML 的 `model.display`
-- [ ] 截圖功能（debug 用）
-- [ ] `SiroUnity/Assets/i18n/zh-TW.json` + ChatInputUI 從這讀字串
+**v0.x 進度子表**（v0.2 → v0.3.1 都屬 Phase 2）：
+
+| 子版本 | 狀態 | 重點 | 對應 commit |
+|---|---|---|---|
+| **v0.2** | ✅ | AgentOS 骨架（Task Queue + Event Bus + Worker Pool）| `f56c4e2` |
+| **v0.3** | ✅ | /chat /ws opt-in 走 AgentOS、Task.id、EventBus unsubscribe、wait_for_task | `73b78b8` `6698fa6` `da28d9f` `02c7381` |
+| **v0.3.1** | ✅ | SSE streaming 基礎建設（MiniMaxStreamingClient + /ws 推 delta）| `99de74c` `d96351b` |
+| **v0.4** | ⏳ | AgentOS 預設開啟（觀察 v0.3 穩定後翻預設）| 待 v0.3 production 驗收 |
+| **v0.4+** | ⏳ | Unity 端 incremental render（接 /ws 的 delta 訊息）| — |
+
+**交付物**（混合：v0.3 完成的 + 仍待做的）：
+- [x] i18n 基礎：`SiroUnity/Assets/Resources/i18n/zh-TW.json` + `Localization.cs` helper + `ChatInputUI` / `PersonaSelectorUI` 接入
+- [x] 待機動作自動 loop（mtn_01）— `2d77361`
+- [x] AgentOS 骨架（v0.2）
+- [x] AgentOS 接到 /chat 跟 /ws（v0.3、opt-in via `SIRO_USE_AGENT_OS`）
+- [x] SSE streaming 基礎建設（v0.3.1、opt-in via `SIRO_STREAMING`）
+- [x] MiniMaxStreamingClient + 13 單元測試 + 2 整合測試
+- [ ] `Live2DModelController` 表情過渡動畫（⏸ 暫停）
+- [ ] 點擊 Mao motion（⏸ 暫停）
+- [ ] Loading 狀態視覺（⏸ 暫停）
+- [ ] 視覺設定檔（亮度、縮放寫進 Persona YAML `model.display`）（⏸ 暫停）
+- [ ] 截圖功能（⏸ 暫停）
+- [ ] Unity 端 incremental render 接 /ws delta 訊息（v1+ 一起做）
 
 **驗收條件**（對應 KPI）：
-- [ ] 角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）
-- [ ] **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）
-- [ ] 表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫
-- [ ] 點擊角色有反饋（Mao 看向滑鼠 / 切表情）
-- [ ] **K10**: bridge tests 覆蓋率 ≥ 80%（含 Phase 1.5 新加的 Persona/fallback path）
-- [ ] 改 `i18n/en-US.json` UI 不用改 code 就變英文
+- [x] 改 `i18n/zh-TW.json` UI 不用改 code 就變中文（zh-TW 預設、`en-US.json` 留 v1+）
+- [x] **K10**: bridge tests 覆蓋率 ≥ 80%（✅ 188+2 = 190 tests pass、v0.3 期間多次擴充）
+- [ ] 角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）— 待機動作 ✅、呼吸/眨眼 ⏸ 暫停
+- [ ] **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）— 工具可量、視覺未動
+- [ ] 表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫（⏸ 暫停）
+- [ ] 點擊角色有反饋（Mao 看向滑鼠 / 切表情）（⏸ 暫停）
+- [ ] **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）（wire 已通、Unity 端待做）
 
-**預估時間**：1-2 週
+**預估時間**：剩餘 ~1 週（5 個視覺項目 + Unity incremental render）
 **依賴**：Phase 1.5 ✅
 **風險**：
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
+- 🟡 Unity incremental render 改動 WS protocol、要跟 v1+ SendTask 一起規劃避免重複改
 
 ---
 
@@ -953,5 +986,7 @@ AI 拿到任何一個 Phase 的 spec，可以獨立完成其中的子任務。
 
 | 日期 | 版本 | 變更 |
 |------|------|------|
+| 2026-06-04 | v3.0 | 對齊 v0.3 實況：Phase 0 改 ✅ 完成、Phase 2 改 🟡 進行中（v0.3.1）、Phase 2 加 v0.x 進度子表、test count 78 → 190、加 cross-ref 段 |
+| 2026-06-04 | v2.0.x | v0.3 期間的細部修訂（PLAN_REVIEW_v0.3、PLAN_REVISION_v2.1）— 見 `docs/PLAN_REVIEW_v0.3.md` |
 | 2026-06-02 | v2.0 | 砍掉重寫。加入 Rust OS 層、4 層架構、6 個 Phase、完整文件清單、AI 協作指南 |
 | 2026-06-02 | v1.0 | 初版（過度樂觀，文件描述願景而非現實） |
