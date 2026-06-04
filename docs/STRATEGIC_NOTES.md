@@ -122,15 +122,20 @@ Streaming 要走 hermes 內部介面（gateway / proxy）來做。
 
 基礎建設 vs UX 差異：
 - v0.3.1 完成了「delta 訊息在 wire 上了」（Unity 收得到 `{"type":"delta","text":"你"}`）
-- 但 Unity 端目前不 render delta（v1+ 才接 incremental render）
-- 等 Unity 接上才看得到實際 UX 改善
+- **2026-06-04 v0.4+ 提前做**：Unity 端 commit 0dd9da7 接了 incremental render
+  - ChatInputUI 訂閱 OnBridgeDelta、累積到 _streamingBuffer、每次 SetResponse 立即更新
+  - 沒開 streaming 時（預設）行為跟 v0.2 一樣、向下相容
+  - 提前做的原因：streaming UX 改善越早看得到越好；wire 變動純 additive（加新 case），不破壞既有 protocol
+  - **脫離原 PLAN 推薦**：PLAN 寫「v0.4+ Unity incremental render 要跟 v1+ SendTask 一起做、避免重複改 protocol」— 沒等 SendTask 是 trade-off：
+    - 優點：早看 UX 效果
+    - 缺點：未來 v1+ SendTask 改 protocol 時，要再 audit 一次 delta/response 互動
+  - 結論：v1+ SendTask + OnClick 仍是獨立 work item、不會 reuse commit 0dd9da7 的 C# code（方向不同 — SendTask 是 Unity → AgentOS 推 task、incremental render 是 AgentOS → Unity 推文字）
 
 ### 待你決策
 
-1. **Unity 端什麼時候接 incremental render？**
-   - v1+ SendTask + OnClick 一起做（推薦、減少 protocol 變動次數）
-   - 提前在 v0.4 做（如果想趕快看 streaming UX 效果）
-2. **選 B 之後的 hermes 抽象評估**：
+1. ~~Unity 端什麼時候接 incremental render？~~ — **2026-06-04 v0.4+ 提前完成**（commit 0dd9da7）
+2. **v1+ SendTask + OnClick** 仍是待做項目（讓 Unity 推 task 進 AgentOS、不是 incremental render）— 時程留 v1.0 roadmap 規劃
+3. **選 B 之後的 hermes 抽象評估**：
    - 現在的 LLM 呼叫有 2 條路（hermes subprocess sync + 直接 anthropic SSE streaming）
    - 之後如果再加 LLM provider，會在這 2 條路各加一個 client
    - 評估：是否要把這 2 條路抽象成統一介面（`LLMClient` protocol）？

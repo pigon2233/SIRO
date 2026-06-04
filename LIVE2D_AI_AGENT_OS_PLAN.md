@@ -9,9 +9,9 @@
 > - ✅ Phase 0 完成（所有文件就位）
 > - ✅ Phase 1 完成（2026-06-03 Unity Play 實測）
 > - ✅ Phase 1.5 / 1.75 完成（runtime 驗收過）
-> - 🟡 **Phase 2 進行中** — v0.3 完成（AgentOS 接到 /chat /ws + SSE streaming 基礎建設）
+> - 🟡 **Phase 2 進行中** — v0.4 完成（SIRO_USE_AGENT_OS 預設翻 true + 視覺設定檔 + K8 量化）、v0.4+ 完成（Unity incremental render，提前 v1+ 規劃做）
 > - ⏳ Phase 3 / 4 / 5 / 6 為規劃
-> - **v0.3.1 進度**：選 Q2 選項 B（hermes_client streaming shim 實作完、Unity 端 incremental render 待 v1+）
+> - **v0.3.1 進度**：選 Q2 選項 B（hermes_client streaming shim + Unity 端 incremental render 都完成）
 
 > **重要 cross-ref**：
 >
@@ -467,8 +467,8 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 | **v0.2**   | ✅   | AgentOS 骨架（Task Queue + Event Bus + Worker Pool）                      | `f56c4e2`                               |
 | **v0.3**   | ✅   | /chat /ws opt-in 走 AgentOS、Task.id、EventBus unsubscribe、wait_for_task | `73b78b8` `6698fa6` `da28d9f` `02c7381` |
 | **v0.3.1** | ✅   | SSE streaming 基礎建設（MiniMaxStreamingClient + /ws 推 delta）           | `99de74c` `d96351b`                     |
-| **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試 | `TBD`（commit 將在 #4 收尾時）           |
-| **v0.4+**  | ⏳   | Unity 端 incremental render（接 /ws 的 delta 訊息）                       | —                                      |
+| **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試 | `c1a3dc5`                              |
+| **v0.4+**  | ✅   | Unity 端 incremental render（接 /ws 的 delta 訊息，**提前於 v1+ 規劃做**— 詳見 STRATEGIC_NOTES.md Q2）| `0dd9da7`                              |
 
 **交付物**（混合：v0.3 完成的 + 仍待做的）：
 
@@ -481,11 +481,12 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  視覺設定檔（亮度、縮放寫進 Persona YAML `model.visual`）— 視覺設定檔 v0.3 收尾
 - [X]  K8 fallback 量化（< 3s assertion）
 - [X]  `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.4 翻預設、逃生 `=false`）
+- [X]  Unity 端 incremental render 接 /ws delta 訊息（**v0.4+ 提前做**，原本規劃 v1+ 一起做 — 詳見 STRATEGIC_NOTES Q2）
 - [ ]  `Live2DModelController` 表情過渡動畫（⏸ 暫停）
 - [ ]  點擊 Mao motion（⏸ 暫停）
 - [ ]  Loading 狀態視覺（⏸ 暫停）
 - [ ]  截圖功能（⏸ 暫停）
-- [ ]  Unity 端 incremental render 接 /ws delta 訊息（v1+ 一起做）
+- [ ]  **v1+** SendTask + OnClick（讓 Unity 推 task 進 AgentOS，跟 #5 incremental render 方向不同）
 
 **驗收條件**（對應 KPI）：
 
@@ -495,15 +496,15 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [ ]  **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）— 工具可量、視覺未動
 - [ ]  表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫（⏸ 暫停）
 - [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）（⏸ 暫停）
-- [ ]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）（wire 已通、Unity 端待做）
+- [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
-**預估時間**：剩餘 ~1 週（5 個視覺項目 + Unity incremental render）
+**預估時間**：剩餘 ~1 週（4 個視覺項目 + 1 個 v1+ SendTask）
 **依賴**：Phase 1.5 ✅
 **風險**：
 
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
-- 🟡 Unity incremental render 改動 WS protocol、要跟 v1+ SendTask 一起規劃避免重複改
+- 🟢 Unity incremental render 已在 v0.4+ 提前做（commit 0dd9da7），v1+ SendTask 仍待規劃（不同方向、wire 互不影響）
 
 ---
 
