@@ -39,6 +39,11 @@ namespace Siro
         // 每次「送出 chat」清空、第一個 delta 開始累積、最終 response 抵達時由 SetResponse 蓋掉
         // 不暴露給 inspector（純內部狀態）
         private System.Text.StringBuilder _streamingBuffer;
+        // v1.2+：送出 chat 後 disable input、避免連點 / 重送
+        // 收到 response / error / 連線斷 才 re-enable
+        private bool _isWaitingForResponse = false;
+        // 動畫「思考中.」dots 的 coroutine handle
+        private Coroutine _thinkingDotsCoroutine;
 
         private void Start()
         {
@@ -142,6 +147,11 @@ namespace Siro
             SetResponse(Localization.Get("ui.send.thinking"));
             // v0.3.1 SSE streaming：清空累積 buffer，等 delta 開始 append
             _streamingBuffer = new System.Text.StringBuilder();
+            // v1.2+：disable input 防連點 + 啟動動畫 dots
+            SetInputEnabled(false);
+            _isWaitingForResponse = true;
+            if (_thinkingDotsCoroutine != null) StopCoroutine(_thinkingDotsCoroutine);
+            _thinkingDotsCoroutine = StartCoroutine(AnimateThinkingDots());
             _ = _bridge.SendChatAsync(text);
 
             if (clearAfterSend)
@@ -150,11 +160,43 @@ namespace Siro
             }
         }
 
+        // ==================== v1.2+ Loading 視覺 ====================
+
+        private void SetInputEnabled(bool enabled)
+        {
+            var input = GetInputField();
+            if (input != null) input.interactable = enabled;
+            if (sendButton != null) sendButton.interactable = enabled;
+        }
+
+        /// <summary>
+        /// 動畫「思考中.」dots 迴圈 — 0/1/2/3 個點循環、給使用者視覺「還在跑」的感覺
+        /// 收到 response / error 就被 stop
+        /// </summary>
+        private System.Collections.IEnumerator AnimateThinkingDots()
+        {
+            string baseText = Localization.Get("ui.send.thinking").TrimEnd('.', ' ');
+            // 拿掉尾巴的 "..."（避免疊加）
+            if (baseText.EndsWith("...")) baseText = baseText.Substring(0, baseText.Length - 3);
+            int dotCount = 0;
+            while (_isWaitingForResponse)
+            {
+                dotCount = (dotCount % 4);  // 0, 1, 2, 3 → 視覺循環
+                string dots = new string('.', dotCount);
+                SetResponse($"{baseText}{dots}");
+                yield return new WaitForSeconds(0.4f);
+            }
+        }
+
         // ==================== 事件處理 ====================
 
         private void HandleResponse(BridgeResponse response)
         {
             if (response == null) return;
+            // v1.2+：response 收到、re-enable input + 停 dots
+            _isWaitingForResponse = false;
+            if (_thinkingDotsCoroutine != null) StopCoroutine(_thinkingDotsCoroutine);
+            SetInputEnabled(true);
             // v0.3.1 SSE streaming：response 是 delta 累積完的最終結果
             // 蓋掉「thinking...」或中途累積的 streaming buffer，
             // 加上情緒標籤（delta 階段還不知道情緒 — 等 LLM 完整跑完才 parse）
@@ -182,6 +224,11 @@ namespace Siro
 
         private void HandleError(BridgeError error)
         {
+            // v1.2+：error 也 re-enable input
+            _isWaitingForResponse = false;
+            if (_thinkingDotsCoroutine != null) StopCoroutine(_thinkingDotsCoroutine);
+            SetInputEnabled(true);
+
             var prefix = Localization.Get("ui.send.error_prefix");
             var unknown = Localization.Get("ui.send.unknown_error");
             SetResponse($"{prefix} {error?.detail ?? unknown}");
@@ -197,6 +244,13 @@ namespace Siro
         // EmotionDisplay 也會同步切 thinking 表情（GAPS.md #9 降級路徑 UX）。
         private void HandleDisconnected()
         {
+            // v1.2+：斷線也要 re-enable input（不然永遠卡住）
+            _isWaitingForResponse = false;
+            if (_thinkingDotsCoroutine != null) StopCoroutine(_thinkingDotsCoroutine);
+            // 斷線時 input 還是不能用（bridge 還沒回），但 disable state 要重置
+            // 讓重連後可以重新送 — 由 SetInputEnabled 決定（看 IsConnected）
+            SetInputEnabled(false);
+
             SetResponse(Localization.Get("ui.connect.reconnecting"));
         }
 
