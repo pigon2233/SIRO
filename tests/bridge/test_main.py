@@ -11,6 +11,7 @@ Phase 1.5+ 改版重點：
 
 from __future__ import annotations
 
+import time
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -262,14 +263,21 @@ class TestChatFallback:
     def test_both_hermes_and_ollama_down_returns_hard_fallback(
         self, client, mock_ollama_unavailable, real_parser
     ):
-        """Hermes 死 + Ollama 死 → 走 persona 靜態文字 + thinking 表情"""
+        """Hermes 死 + Ollama 死 → 走 persona 靜態文字 + thinking 表情
+
+        K8 KPI：hard fallback 必須 < 3 秒 — 這是 SIRO 的 SLA
+        （Mao 看起來永遠在線、不會卡 5-10 秒沒回應）
+        """
         mock_hermes = MagicMock(spec=HermesClient)
         mock_hermes.is_available.return_value = False
 
         original = state.hermes
         state.hermes = mock_hermes
         try:
+            t0 = time.perf_counter()
             r = client.post("/chat", json={"message": "hi", "user_id": "test"})
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+
             assert r.status_code == 200
             data = r.json()
             # 硬降級：thinking 表情
@@ -279,6 +287,12 @@ class TestChatFallback:
             assert len(data["text"]) > 0
             # raw_response 標記走 hard fallback
             assert "hard fallback" in (data.get("raw_response") or "")
+            # K8 KPI: < 3 秒
+            assert elapsed_ms < 3000, (
+                f"K8 fallback SLA fail: hard fallback 花了 {elapsed_ms:.0f}ms "
+                f"（目標 < 3000ms）"
+            )
+            print(f"\n  K8 hard fallback 實際時間: {elapsed_ms:.0f}ms（< 3000ms 達標）")
         finally:
             state.hermes = original
 
