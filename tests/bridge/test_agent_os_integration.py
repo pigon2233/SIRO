@@ -295,3 +295,120 @@ class TestWebSocketViaAgentOS:
                 assert pong["type"] == "pong"
         finally:
             state.agent_os = original
+
+
+# ==================== /ws SSE Streaming (v0.3.1 選項 B) ====================
+
+class TestWebSocketStreaming:
+    """/ws WebSocket SSE streaming 路徑（SIRO_STREAMING=true）
+
+    用 mock 的 MiniMaxStreamingClient 注入假的 chat_stream() 行為，
+    不真的打 MiniMax-M3 API。測試重點：
+    - /ws 收到 chat → 推多個 {"type":"delta","text":"..."}
+    - 收完所有 chunk 後推 {"type":"response",...}（跟 sync 路徑同格式）
+    - 連線不中斷（ping/pong 仍能用）
+    """
+
+    @pytest.fixture
+    def enable_streaming(self, monkeypatch):
+        """打開 SIRO_STREAMING flag + 把 streaming_client 換成 mock"""
+        monkeypatch.setattr(state, "use_streaming", True, raising=False)
+        yield
+
+    @pytest.fixture
+    def mock_streaming_client(self):
+        """替換 state.streaming_client：is_available=True、chat_stream 給假 chunk"""
+        from bridge.minimax_streaming_client import MiniMaxStreamingClient
+
+        mock = MagicMock(spec=MiniMaxStreamingClient)
+        mock.is_available = True
+
+        async def fake_chat_stream(message, system_prompt=None):
+            """模擬 LLM 邊生成邊吐 chunk"""
+            for chunk in ["你", "好", "，", "Mao", "！"]:
+                yield chunk
+
+        mock.chat_stream = fake_chat_stream
+
+        original = state.streaming_client
+        state.streaming_client = mock
+        yield mock
+        state.streaming_client = original
+
+    def test_ws_streaming_pushes_deltas_then_response(
+        self, client, mock_hermes_setup, enable_streaming, mock_streaming_client
+    ):
+        """flag=true 時 /ws 應該推 5 個 delta + 1 個 response（順序正確）"""
+        original_parser = state.parser
+        state.parser = EmotionParser()
+        try:
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({
+                    "type": "chat",
+                    "message": "hi",
+                    "user_id": "ws-stream-test",
+                })
+
+                # 收 5 個 delta
+                deltas = []
+                for _ in range(5):
+                    msg = ws.receive_json()
+                    assert msg["type"] == "delta"
+                    deltas.append(msg["text"])
+                assert deltas == ["你", "好", "，", "Mao", "！"]
+
+                # 第 6 個是 final response
+                final = ws.receive_json()
+                assert final["type"] == "response"
+                assert final["text"] == "你好，Mao！"
+                assert final["emotion"] in ("neutral", "happy")  # 視情緒標籤
+                assert "live2d" in final
+
+                # 連線還能用
+                ws.send_json({"type": "ping"})
+                pong = ws.receive_json()
+                assert pong["type"] == "pong"
+        finally:
+            state.parser = original_parser
+
+    def test_ws_streaming_failure_triggers_fallback_over_ws(
+        self, client, mock_hermes_setup, enable_streaming
+    ):
+        """streaming_client 拋 exception → 走 fallback response（連線不中斷）"""
+        from bridge.minimax_streaming_client import MiniMaxStreamingClient
+
+        mock = MagicMock(spec=MiniMaxStreamingClient)
+        mock.is_available = True
+
+        async def failing_chat_stream(message, system_prompt=None):
+            raise RuntimeError("simulated streaming failure")
+            yield  # unreachable, makes it a generator
+
+        mock.chat_stream = failing_chat_stream
+
+        original = state.streaming_client
+        state.streaming_client = mock
+        original_parser = state.parser
+        state.parser = EmotionParser()
+        try:
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({
+                    "type": "chat",
+                    "message": "test",
+                    "user_id": "ws-stream-fail",
+                })
+
+                # 應該直接收 fallback response（沒有 delta）
+                data = ws.receive_json()
+                assert data["type"] == "response"
+                assert isinstance(data["text"], str)
+                assert len(data["text"]) > 0
+                assert "live2d" in data
+
+                # 連線還能用
+                ws.send_json({"type": "ping"})
+                pong = ws.receive_json()
+                assert pong["type"] == "pong"
+        finally:
+            state.streaming_client = original
+            state.parser = original_parser

@@ -100,6 +100,15 @@ class BridgeState:
         # 設 true 後 /chat 改成 enqueue → wait_for_task 的 flow
         # v0.3 觀察穩定後 v0.4 預設改 true
         self.use_agent_os = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
+        # v0.3.1：/chat /ws 是否走 MiniMax-M3 SSE streaming（STRATEGIC_NOTES Q2 選項 B）
+        # 預設 false（保持 v0.2 sync、165 既有測試不動）
+        # 設 true 後 /ws 推 {"type":"delta", "text":"..."} 增量訊息、
+        # 讓 Unity 端可以邊收邊 render（v1+ Unity 端要改）
+        # /chat HTTP 端點不影響 API 形狀（仍回完整 ChatResponse）
+        self.use_streaming = os.environ.get("SIRO_STREAMING", "false").lower() == "true"
+        # MiniMax SSE client（跟 hermes 共用 env vars）
+        from .minimax_streaming_client import MiniMaxStreamingClient
+        self.streaming_client = MiniMaxStreamingClient()
         # v0.2+：sessions_lock 保護多 thread / 多 request 並行讀寫
         # 雖然單 process + asyncio 已經序列化大部分 access，但
         # 1. tasks 在 worker thread pool（to_thread）執行
@@ -711,6 +720,97 @@ async def websocket_endpoint(websocket: WebSocket):
                         "intensity": fallback.intensity,
                         "live2d": fallback.live2d.model_dump(),
                         "session_id": fallback.session_id,
+                    })
+                    continue
+
+                # v0.3.1 SSE streaming 路徑（STRATEGIC_NOTES Q2 選項 B）：
+                #   - SIRO_STREAMING=true → 走 MiniMaxStreamingClient.chat_stream() 收 SSE
+                #   - 每收到一個 text chunk 就推 {"type":"delta","text":"..."} 給 Unity
+                #   - 收集完所有 chunk 後 parse emotion、推 {"type":"response",...}
+                #   - Unity 端目前收到 delta 不 render（v1+ 才接 incremental render）
+                #   - 預設 false — 既有測試不動
+                t0 = time.time()
+                if state.use_streaming and state.streaming_client.is_available:
+                    # 自己建 prompt + system（跟 v0.2 sync 路徑同樣邏輯）
+                    stream_history = state.sessions.get(session_id, [])
+                    stream_history_context = ""
+                    if stream_history:
+                        stream_history_context = "\n\n最近的對話：\n" + "\n".join(
+                            f"使用者: {h['user']}\n你: {h['agent']}" for h in stream_history[-5:]
+                        )
+                    stream_prompt = f"{stream_history_context}\n\n使用者: {message}" if stream_history_context else message
+                    stream_system = get_personality(personality)
+
+                    logger.info(f"⏱ [ws] 走 MiniMax-M3 SSE streaming")
+                    t_stream_start = time.time()
+                    delta_count = 0
+                    full_text_parts: list[str] = []
+                    ttft_ms: Optional[int] = None
+                    try:
+                        async for chunk in state.streaming_client.chat_stream(
+                            message=stream_prompt,
+                            system_prompt=stream_system,
+                        ):
+                            if ttft_ms is None:
+                                ttft_ms = int((time.time() - t_stream_start) * 1000)
+                                logger.info(f"⚡ [ws] TTFT={ttft_ms}ms")
+                            delta_count += 1
+                            full_text_parts.append(chunk)
+                            # 推 delta 給 Unity（v1+ 才用、目前客戶端會忽略）
+                            await websocket.send_json({
+                                "type": "delta",
+                                "text": chunk,
+                            })
+                    except Exception as e:
+                        logger.error(f"[ws] streaming 失敗: {e}")
+                        # streaming 失敗 → 走 fallback（跟 sync 路徑的 hermes 失敗同樣處理）
+                        fallback = await _make_fallback_response(
+                            user_id=user_id,
+                            session_id=session_id,
+                            category="error",
+                            persona_name=personality,
+                            error_detail=f"streaming error: {e}",
+                            user_message=message,
+                        )
+                        await websocket.send_json({
+                            "type": "response",
+                            "text": fallback.text,
+                            "emotion": fallback.emotion.value,
+                            "intensity": fallback.intensity,
+                            "live2d": fallback.live2d.model_dump(),
+                            "session_id": fallback.session_id,
+                        })
+                        continue
+
+                    full_text = "".join(full_text_parts)
+                    t_stream_total = int((time.time() - t_stream_start) * 1000)
+                    logger.info(
+                        f"💬 [ws-streaming] user={message[:40]!r} → llm={full_text[:80]!r} "
+                        f"[⚡ TTFT={ttft_ms}ms total={t_stream_total}ms deltas={delta_count}]"
+                    )
+                    # 解析情緒（跟 sync 路徑一樣用 persona 專屬 parser）
+                    clean_text, emotion, intensity = parser.parse(
+                        full_text, user_input=message
+                    )
+                    live2d_signal = parser.to_live2d_signal(emotion, intensity)
+                    # 寫歷史（同樣用 state.sessions_lock）
+                    with state.sessions_lock:
+                        if session_id not in state.sessions:
+                            state.sessions[session_id] = []
+                        state.sessions[session_id].append({
+                            "user": message,
+                            "agent": clean_text,
+                            "emotion": emotion.value,
+                        })
+                        state.sessions[session_id] = state.sessions[session_id][-20:]
+                    # 推 final response（Unity 端跟 sync 路徑收到的格式一樣）
+                    await websocket.send_json({
+                        "type": "response",
+                        "text": clean_text,
+                        "emotion": emotion.value,
+                        "intensity": intensity,
+                        "live2d": live2d_signal.model_dump(),
+                        "session_id": session_id,
                     })
                     continue
 
