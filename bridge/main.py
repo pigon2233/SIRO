@@ -295,11 +295,13 @@ async def _handle_sendtask(websocket: WebSocket, data: dict) -> None:
         "status": "accepted",
     })
 
-    # 背景跑 handler
+    # 背景跑 handler — ctx 包含 handler 可能用到的一切
+    # （state, user_id, task_id, websocket — 給 mood.set 推 response 給 Unity 用）
     ctx = {
         "state": state,
         "user_id": user_id,
         "task_id": task_id,
+        "websocket": websocket,
     }
     logger.info(f"[SendTask] 接 task: {name} args={args} (task_id={task_id})")
 

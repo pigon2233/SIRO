@@ -114,7 +114,8 @@ class TestWebSocketTaskFlow:
     def test_bridge_task_message_acks_and_executes(
         self, client, mock_hermes_setup, registered_tasks
     ):
-        """bridge 收 task → 推 task_ack → handler 跑完推 task_result"""
+        """bridge 收 task → 推 task_ack → handler 跑完推 task_result
+        mood.set 還會多推一條 response（給 Unity 切表情用）"""
         with client.websocket_connect("/ws") as ws:
             ws.send_json(self._make_task_msg(task_id="aabbcc11", name="mood.set",
                                               args={"emotion": "happy", "intensity": 0.8}))
@@ -125,7 +126,15 @@ class TestWebSocketTaskFlow:
             assert ack["task_id"] == "aabbcc11"
             assert ack["status"] == "accepted"
 
-            # 2. 收到 task_result
+            # 2. mood.set 推 response（給 Unity 切表情）
+            response = ws.receive_json()
+            assert response["type"] == "response"
+            assert response["emotion"] == "happy"
+            assert response["intensity"] == 0.8
+            assert response["live2d"]["expression_id"]  # persona 對應的 expression
+            assert response.get("_source") == "mood.set"  # 標記來源
+
+            # 3. 收到 task_result
             result = ws.receive_json()
             assert result["type"] == "task_result"
             assert result["task_id"] == "aabbcc11"
@@ -133,7 +142,7 @@ class TestWebSocketTaskFlow:
             assert result["result"]["mood"]["emotion"] == "happy"
             assert result["result"]["mood"]["intensity"] == 0.8
 
-            # 3. 連線還能用
+            # 4. 連線還能用
             ws.send_json({"type": "ping"})
             pong = ws.receive_json()
             assert pong["type"] == "pong"
@@ -141,7 +150,7 @@ class TestWebSocketTaskFlow:
     def test_bridge_task_success_writes_state(
         self, client, mock_hermes_setup, registered_tasks
     ):
-        """mood.set 成功 → state.current_mood 寫入"""
+        """mood.set 成功 → state.current_mood 寫入 + 推 response"""
         with client.websocket_connect("/ws") as ws:
             ws.send_json(self._make_task_msg(
                 task_id="11223344",
@@ -150,6 +159,7 @@ class TestWebSocketTaskFlow:
                 user_id="alice",
             ))
             ws.receive_json()  # ack
+            ws.receive_json()  # response (mood.set 推給 Unity 切表情)
             result = ws.receive_json()
             assert result["type"] == "task_result"
             # handler 已跑完、state 已寫入（mutation 是同步、send_json 是 IO 等待）
@@ -254,6 +264,7 @@ class TestStateCurrentMood:
                 "user_id": "bob",
             })
             ws.receive_json()  # ack
+            ws.receive_json()  # response (mood.set 推給 Unity 切表情)
             ws.receive_json()  # result
             # handler 跑完 → state 寫入
             assert "bob" in state.current_mood

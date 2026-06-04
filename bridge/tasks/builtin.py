@@ -29,10 +29,11 @@ logger = logging.getLogger("siro.tasks.builtin")
 async def mood_set(args: dict, ctx: dict) -> dict:
     """
     設當前 mood — 影響後續 chat 的 emotion 預設
+    v1.2 還會推一條 response 給 Unity → 表情立即切換
 
     Args:
         args: {"emotion": "happy", "intensity": 0.7}（intensity optional，預設 0.7）
-        ctx: {state, user_id, task_id}
+        ctx: {state, user_id, task_id, websocket}
     Returns:
         {"ok": True, "mood": {"emotion": "happy", "intensity": 0.7}}
     Raises:
@@ -63,6 +64,36 @@ async def mood_set(args: dict, ctx: dict) -> dict:
         "intensity": intensity,
         "set_at": time.time(),
     }
+
+    # v1.2+：主動推一條 response 給 Unity → 表情立即切換
+    # 用 persona 的 emotion_parser 把 mood emotion 轉成 Live2DSignal
+    # （跟 /chat response 一樣的 pipeline — EmotionDisplay 直接套用）
+    from ..emotion_parser import EmotionParser
+    from ..models import Live2DSignal
+    from ..prompts import get_persona_expressions, get_personality
+
+    persona_name = state.active_persona or "siro-default"
+    expressions = get_persona_expressions(persona_name)
+    parser = EmotionParser(persona_expressions=expressions)
+    try:
+        live2d_signal = parser.to_live2d_signal(Emotion(emotion_str), intensity)
+    except Exception as e:
+        logger.warning(f"[mood.set] 推 response 失敗（persona 沒這個 emotion 設定）: {e}")
+        live2d_signal = None
+
+    if live2d_signal is not None and "websocket" in ctx:
+        try:
+            await ctx["websocket"].send_json({
+                "type": "response",
+                "text": "",  # mood.set 不講話、只是切表情
+                "emotion": emotion_str,
+                "intensity": intensity,
+                "live2d": live2d_signal.model_dump(),
+                "session_id": f"{ctx['user_id']}-mood",
+                "_source": "mood.set",  # 給 Unity 區分是 mood task 來的（不是 chat）
+            })
+        except Exception as e:
+            logger.warning(f"[mood.set] 推 response 給 Unity 失敗: {e}")
 
     logger.info(
         f"[mood.set] user={ctx['user_id']} → emotion={emotion_str} intensity={intensity}"
