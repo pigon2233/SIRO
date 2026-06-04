@@ -213,6 +213,13 @@ async def lifespan(app: FastAPI):
     await state.agent_os.start(num_workers=3)
     logger.info("  AgentOS 啟動（3 個 worker，task queue + event bus 就緒）")
     logger.info(f"  /chat 走 AgentOS: {state.use_agent_os}（SIRO_USE_AGENT_OS env 控制）")
+    logger.info(
+        f"  /ws 走 SSE streaming: {state.use_streaming}（SIRO_STREAMING env 控制）"
+    )
+    if state.use_streaming:
+        logger.info(
+            f"  MiniMaxStreamingClient is_available: {state.streaming_client.is_available}"
+        )
 
     yield
 
