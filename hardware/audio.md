@@ -149,3 +149,136 @@ pactl set-sink-volume @DEFAULT_SINK@ 50%
 - 環繞音效
 - 藍牙音訊（延遲高）
 - 錄音 / 編輯功能
+
+---
+
+## STT / TTS 整合（Phase 5 規劃，K6 對應）
+
+SIRO 的音訊目標是**雙向語音對話**：
+- 麥克風 → STT → LLM（hermes）
+- LLM → TTS → 喇叭
+
+### STT（Speech-to-Text）候選
+
+| 工具 | 語言 | 延遲 | 品質 | 推薦 |
+|------|------|------|------|------|
+| Whisper.cpp | 多語 | 1-2s | ⭐⭐⭐⭐ | ✅ 本地首選 |
+| Vosk | 多語 | < 500ms | ⭐⭐⭐ | 🟡 低延遲備案 |
+| OpenAI Whisper API | 多語 | 1-3s | ⭐⭐⭐⭐⭐ | 🟡 雲端 fallback |
+| 瀏覽器 Web Speech | Chrome | 1-2s | ⭐⭐⭐ | ❌ 瀏覽器限定 |
+
+**推薦**：本地 Whisper.cpp（base 或 small 模型）、雲端 fallback OpenAI Whisper。
+
+### TTS（Text-to-Speech）候選
+
+| 工具 | 語言 | 延遲 | 品質 | 推薦 |
+|------|------|------|------|------|
+| Piper | 多語 | < 500ms | ⭐⭐⭐ | ✅ 本地首選 |
+| Edge TTS (msedge) | 中英日 | < 1s | ⭐⭐⭐⭐ | 🟡 雲端品質好 |
+| OpenAI TTS API | 多語 | 1-2s | ⭐⭐⭐⭐⭐ | 🟡 雲端 fallback |
+| espeak | 多語 | < 100ms | ⭐ | ❌ 太機械 |
+
+**推薦**：本地 Piper（zh_TW 模型）、雲端 fallback Edge TTS。
+
+### 音訊 pipeline（Phase 5 設計）
+
+```
+[使用者說話]
+  ↓ VAD (voice activity detection, webrtcvad)
+[麥克風] → PulseAudio echo-cancel source
+  ↓ 16kHz mono PCM
+[Whisper STT] → text
+  ↓
+[hermes LLM] → response text
+  ↓
+[Piper TTS] → 24kHz wav
+  ↓
+[PulseAudio echo-cancel sink]
+[喇叭]
+```
+
+### 端到端延遲目標（K6 KPI）
+
+- STT: < 1.5 秒（1-2 秒語音輸入）
+- LLM: < 5 秒（雲端 MiniMax-M3）/< 10 秒（本地 Ollama）
+- TTS: < 1 秒
+- **總計**: < 8 秒（雲端）/< 13 秒（本地）
+
+---
+
+## 麥克風外接選項
+
+| 選項 | 優點 | 缺點 | 推薦場景 |
+|------|------|------|----------|
+| **ReSpeaker USB Mic Array v2.0** | 4 麥克風 + DSP 處理、Linux 友善 | 貴（~NT$3500）| ✅ 推薦 v1 |
+| ReSpeaker 4-Mic Array for Raspberry Pi | 便宜（~NT$2000）| 要接 Pi 中介 | 🟡 DIY |
+| 內建 HDA 麥克風 | 免錢 | 收音距離短 | 🟡 開發期 |
+| USB 會議麥克風 (e.g. Jabra) | 多人收音 | 貴 + driver 複雜 | ❌ v1 不考慮 |
+
+### ReSpeaker 4-Mic Array 設定
+
+```bash
+# 1. 確認 USB 裝置
+lsusb | grep "ReSpeaker"
+arecord -l  # 應該看到 card 1 或 2
+
+# 2. 設為預設 source
+pactl set-default-source alsa_input.usb-ReSpeaker_4_Mic_Array_*
+
+# 3. 測試
+arecord -d 5 -f cd -D plughw:1,0 test.wav
+# 用耳機聽或 aplay 撥放
+aplay test.wav
+```
+
+---
+
+## 音訊驗證 SOP（`hardware/verify-audio.sh`）
+
+```bash
+#!/bin/bash
+set -e
+
+# 1. 確認音效晶片
+lspci | grep -i audio
+# 預期：Realtek HDA
+
+# 2. 確認麥克風收音（SNR 量測）
+arecord -d 5 -f cd -r 16000 test.wav
+sox test.wav -n stat  # 看 SNR / RMS
+# 預期：SNR > 20dB
+
+# 3. 確認 echo-cancel 啟用
+pactl list modules | grep "module-echo-cancel"
+# 預期：有 echo-cancel 模組載入
+
+# 4. STT 端到端測試
+arecord -d 3 -f cd test.wav
+whisper test.wav --language Chinese --model base
+# 預期：輸出文字（自己說什麼就出什麼）
+
+# 5. TTS 端到端測試
+echo "你好，我是 Mao" | piper --model zh_TW --output_file out.wav
+aplay out.wav
+# 預期：聽到中文語音
+
+# 6. 端到端延遲
+time (arecord -d 3 -f cd in.wav && whisper in.wav --language Chinese > text.txt && \
+      cat text.txt | piper --model zh_TW --output_file out.wav && aplay out.wav)
+# 預期：< 8 秒（雲端 LLM）/ < 13 秒（本地 LLM）
+
+echo "ALL PASS"
+```
+
+---
+
+## Phase 5 時程估算
+
+| 項目 | 預估 | 風險 |
+|------|------|------|
+| PulseAudio 設定 + AEC 驗證 | 1 天 | 中（AEC 除錯）|
+| Whisper.cpp 整合 + 繁中模型 | 2 天 | 中（繁中辨識率）|
+| Piper TTS 整合 + 繁中模型 | 1 天 | 低 |
+| ReSpeaker 麥克風陣列設定 | 0.5 天 | 中（DSP 配置）|
+| 端到端 pipeline 串接 + 延遲量測 | 2 天 | 高（要 tune 好幾個環節）|
+| **總計** | **6.5 天** | — |

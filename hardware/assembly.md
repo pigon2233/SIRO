@@ -194,3 +194,99 @@ Phase 6+ 才考慮。固定架 + 美觀整合。
 - ❌ 加電池（如果原本是純 AC）
 
 這些都是 Phase 6+ 或 v2+ 才考慮。
+
+---
+
+## 推薦硬體型號（具體可買）
+
+| 項目 | 型號 | 價位 (TWD) | 理由 |
+|------|------|-----------|------|
+| 直立筆電架 | ACCURITE 金屬直立架 17 吋 | ~800 | 通風好、穩固、支援 17 吋 |
+| 散熱底座 | Cooler Master NotePal X-Slim | ~1500 | 大風扇、安靜、17 吋相容 |
+| 散熱膏 | Thermal Grizzly Kryonaut | ~500 | 導熱係數高、CPU 降 5-10°C |
+| 外接視訊 | Logitech C920 / C922 | ~2000 | Linux 友善、UVC 標準、1080p |
+| 外接麥克風 | ReSpeaker USB Mic Array v2.0 | ~3500 | 4 麥克風陣列 + DSP 處理 |
+| 外接喇叭 | Creative Pebble V3 (USB) | ~1500 | USB 供電 + 3.5mm，省桌面空間 |
+
+---
+
+## Phase 5 改裝 SOP（v1 推薦路徑：選項 B 直立架 + 散熱底座）
+
+### Day 1: 硬體擺放
+
+1. 筆電關機、拔電
+2. 裝進直立架
+3. HDMI 線接外接螢幕（如果有，沒有的話蓋上筆電螢幕）
+4. USB 線接外接視訊 / 麥克風
+5. 變壓器接上
+
+### Day 2: BIOS 設定
+
+1. 開機進 BIOS（F2 / Del）
+2. `Advanced → AC Power Recovery → Power On`
+3. `ErP Ready → Disabled`
+4. 存檔重啟
+
+### Day 3: 軟體限制
+
+```bash
+# 限制 NVIDIA 功耗
+sudo nvidia-smi -pl 60
+
+# 安裝 siro-power-limit systemd service
+sudo cp os/systemd/siro-power-limit.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now siro-power-limit.service
+
+# 確認
+systemctl status siro-power-limit.service
+nvidia-smi -q -d POWER | grep "Power Limit"
+```
+
+### Day 4: 散熱膏升級（選配）
+
+> ⚠️ 開筆電會破壞保固、量產前不要做
+
+1. 拆後蓋（螺絲起子）
+2. 舊散熱膏擦掉（酒精 + 紙巾）
+3. 塗新散熱膏（薄薄一層、十字或點狀）
+4. 鎖回後蓋
+
+---
+
+## 驗證腳本（`hardware/verify-assembly.sh`）
+
+```bash
+#!/bin/bash
+set -e
+
+# 1. 確認 AC Power Recovery 啟用
+sudo dmidecode -s bios-version
+# 確認 BIOS 有「Power On after AC loss」設定
+
+# 2. 確認 NVIDIA 功耗限制
+nvidia-smi -q -d POWER | grep "Power Limit" | grep "60.00 W"
+# 預期：Power Limit 顯示 60W（原本 95W）
+
+# 3. 確認 systemd service
+systemctl is-active siro-power-limit.service
+
+# 4. 監控溫度（跑 5 分鐘 Unity + LLM 推論）
+timeout 300 watch -n 5 'sensors | grep "Tdie\|Tctl"'
+# 預期：CPU 溫度 < 85°C（沒降頻）
+
+echo "ALL PASS"
+```
+
+---
+
+## Phase 5 時程估算
+
+| 項目 | 預估 | 風險 |
+|------|------|------|
+| 直立架 + 散熱底座 + BIOS 設定 | 1 天 | 低 |
+| 軟體限制（NVIDIA + systemd）| 0.5 天 | 低 |
+| 散熱膏升級（選配）| 1 天 | 中（破保固 + 拆機風險）|
+| 外接視訊 / 麥克風 / 喇叭 整合 | 1 天 | 中（V4L2 + PulseAudio 設定）|
+| 驗證腳本 + 燒機測試 | 1 天 | 低 |
+| **總計** | **4.5 天** | — |
