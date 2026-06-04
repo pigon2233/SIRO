@@ -81,6 +81,42 @@ Streaming 要走 hermes 內部介面（gateway / proxy）來做。
    - /ws 改用 `chat_stream` 邊收邊推 Unity
    - Unity 端 incremental text rendering
 
+### v0.3 hermes 能力探測結果（2026-06-04）
+
+跑 `hermes --help` / `hermes proxy --help` / `hermes chat --help` 後的發現：
+
+| 介面 | 是否支援 MiniMax-M3 | 是否支援 streaming |
+|---|---|---|
+| `hermes chat` (subprocess，bridge 現用) | ✅ 用 `HERMES_LLM_BASE_URL` 自訂 anthropic provider | ❌ 沒 `--stream` flag |
+| `hermes proxy` (HTTP server) | ❌ **只支援 `nous`（Nous Portal）跟 `xai`（xAI Grok OAuth）** | ✅ OpenAI-compatible SSE |
+| `hermes gateway` | — | (messaging 用、不是 LLM 介面) |
+
+**結論**：「走 hermes 介面 streaming」**被 provider 限制擋住**。
+
+- `hermes proxy` 是 OpenAI-compatible HTTP + SSE，本來是理想解
+- 但 proxy 只支援 `nous` 跟 `xai`，不支援 SIRO 目前的 `HERMES_LLM_PROVIDER=anthropic` + 自訂 `HERMES_LLM_BASE_URL=https://api.minimax.io/anthropic`
+- `hermes chat` (subprocess) 沒 streaming flag
+
+### v0.3.1 新選項
+
+| 解法 | 優點 | 缺點 | 實作成本 |
+|---|---|---|---|
+| A. **換 LLM provider 到 Nous Portal** | 直接用 `hermes proxy` 拿 SSE streaming | 換掉 MiniMax-M3（目前品質滿意）、要重新 tune persona prompt | 半天 + provider 切換風險 |
+| B. **保持 MiniMax-M3 + 寫 hermes_client streaming shim** | 保留 MiniMax-M3、走 hermes 介面抽象、SS 仍 SSE | 「hermes 介面」這層變薄（要呼叫 anthropic /messages API 而非 hermes proxy）| 1 天 |
+| C. **保持 MiniMax-M3 + 接受 v0.3 現實 18s** | 0 工程 | user 繼續等 | 0 |
+| D. **換本地 Ollama** | 0 雲端成本、0 延遲 | 本地 7B Q4 跑不動（VRAM 4GB 限制）、品質比 MiniMax-M3 差 | 半天 tune |
+
+**推薦**：先選 C（接受現狀）留 v0.3 不動，v0.4 看使用體驗再決定。
+如果真的想動：B 是最務實的解（保留 MiniMax-M3 + 走 hermes 抽象 + streaming），
+但「hermes 介面」會從 subprocess 變成直接打 anthropic API（要評估 hermes 抽象是否仍有意義）。
+
+### 待你決策
+
+1. **A / B / C / D 哪個？**（v0.3 不動 = C）
+2. 如果 B：要先確認「hermes 抽象」是否仍是必要（現在的 LLM 呼叫只有 1 個 provider、
+   hermes 抽象主要價值是「換 provider 容易」，如果只用 MiniMax-M3 不換，
+   那 hermes 這層就只是「多繞一層 subprocess」）
+
 ### v0.2 行動
 - 寫這份文件 ✅
 - v0.3 查 hermes 能力 + 量測 → 決定要不要做
