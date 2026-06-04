@@ -46,11 +46,13 @@ class Task:
     Attributes:
         name: 給 log / 除錯用的任務名（例 "llm.reply"）
         coro: 要執行的 async 函式
+        id: 唯一 ID，UUID4，用於 event bus 比對 (v0.3 AgentOS 接 endpoint)
         kwargs: 傳給 coro 的參數
         created_at: enqueue 時間（unix time）
     """
     name: str
     coro_factory: Callable[..., Awaitable[Any]]  # 傳 *args, **kwargs 回 coroutine
+    id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex[:8])
     args: tuple = field(default_factory=tuple)
     kwargs: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
@@ -88,12 +90,15 @@ class EventBus:
     def __init__(self):
         self._subscribers: Dict[str, List[Callable[[Event], Awaitable[None]]]] = {}
 
-    def subscribe(self, event_type: str, handler: Callable[[Event], Union[None, Awaitable[None]]]):
+    def subscribe(self, event_type: str, handler: Callable[[Event], Union[None, Awaitable[None]]]) -> Callable[[], None]:
         """訂閱事件
 
         Args:
             event_type: "*" 匹配所有事件
             handler: sync 或 async callable，接收 Event
+
+        Returns:
+            unsubscribe 函式 — 呼叫後取消訂閱（避免 memory leak / 殘留 handler）
         """
         async def wrap(event: Event):
             try:
@@ -105,6 +110,16 @@ class EventBus:
 
         self._subscribers.setdefault(event_type, []).append(wrap)
         logger.debug(f"[EventBus] 訂閱 {event_type}（共 {len(self._subscribers[event_type])} 個）")
+
+        def unsubscribe() -> None:
+            """取消這個 handler 對這個 event_type 的訂閱"""
+            if event_type in self._subscribers:
+                self._subscribers[event_type] = [
+                    w for w in self._subscribers[event_type] if w is not wrap
+                ]
+                logger.debug(f"[EventBus] 取消訂閱 {event_type}（剩 {len(self._subscribers[event_type])} 個）")
+
+        return unsubscribe
 
     async def emit(self, event: Event):
         """發事件 — 給所有訂閱者（type 完全匹配 + "*" 萬用）"""
@@ -214,29 +229,32 @@ class AgentOS:
             raise
 
     async def _execute_task(self, worker_id: int, task: Task):
-        """執行單一 task + 自動發 task.completed / task.failed 事件"""
+        """執行單一 task + 自動發 task.completed / task.failed 事件
+
+        v0.3 改：event data 帶 task_id，caller 可用 wait_for_task() 對應到自己 enqueue 的 task
+        """
         duration_ms = (time.time() - task.created_at) * 1000
         logger.info(
-            f"[AgentOS] worker {worker_id} 跑 {task.name} "
+            f"[AgentOS] worker {worker_id} 跑 {task.name}[id={task.id}] "
             f"(queue 等待 {duration_ms:.0f}ms)"
         )
         t0 = time.time()
         try:
             result = await task.run()
             run_ms = (time.time() - t0) * 1000
-            logger.info(f"[AgentOS] {task.name} 完成 ({run_ms:.0f}ms)")
+            logger.info(f"[AgentOS] {task.name}[id={task.id}] 完成 ({run_ms:.0f}ms)")
             await self.event_bus.emit(Event(
                 type="task.completed",
-                data={"task": task.name, "result": result, "duration_ms": run_ms},
+                data={"task": task.name, "task_id": task.id, "result": result, "duration_ms": run_ms},
                 source=f"worker-{worker_id}",
             ))
             return result
         except Exception as e:
             run_ms = (time.time() - t0) * 1000
-            logger.exception(f"[AgentOS] {task.name} 失敗 ({run_ms:.0f}ms)")
+            logger.exception(f"[AgentOS] {task.name}[id={task.id}] 失敗 ({run_ms:.0f}ms)")
             await self.event_bus.emit(Event(
                 type="task.failed",
-                data={"task": task.name, "error": str(e), "traceback": traceback.format_exc()},
+                data={"task": task.name, "task_id": task.id, "error": str(e), "traceback": traceback.format_exc()},
                 source=f"worker-{worker_id}",
             ))
             # 不 raise — worker loop 繼續跑下一個 task
@@ -254,3 +272,74 @@ class AgentOS:
     @property
     def processed_count(self) -> int:
         return self._processed_count
+
+    # ==================== v0.3 給 endpoint 用的 helper ====================
+
+    async def wait_for_task(
+        self,
+        task_name: str,
+        task_id: str,
+        *,
+        timeout: float = 600.0,
+    ) -> Optional[Dict[str, Any]]:
+        """等指定 task_id 的 task.completed / task.failed 事件
+
+        用法（典型 /chat endpoint）：
+            task = create_llm_reply_task(state=state, user_id="u1", message="hi")
+            state.agent_os.enqueue(task)
+            result = await state.agent_os.wait_for_task(
+                task_name="llm.reply",
+                task_id=task.id,
+                timeout=600.0,
+            )
+            if result is None:  # timeout
+                return fallback
+            if "error" in result:  # failed
+                return fallback
+            return ChatResponse(**result["result"])
+
+        Args:
+            task_name: 等的 task name（用 task name 過濾避免其他 task 干擾）
+            task_id: Task.id，用 UUID 唯一辨識
+            timeout: 最長等多久（秒），預設 600s
+
+        Returns:
+            task.completed 事件的 data dict（含 "result" key），
+            或 task.failed 事件的 data dict（含 "error" key），
+            或 None（timeout）
+
+        Note:
+            timeout 不會 cancel task，task 仍會在 worker 跑完。
+        """
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+
+        def on_done(event: Event):
+            if event.data.get("task") != task_name:
+                return  # 其他 task 的事件，忽略
+            if event.data.get("task_id") != task_id:
+                return  # 同名 task 但不同 id，忽略
+            if not fut.done():
+                if event.type == "task.completed":
+                    fut.set_result(event.data)
+                elif event.type == "task.failed":
+                    # 把 failed 事件包成「特殊結果」回傳，讓 caller 判斷
+                    fut.set_result({"__failed__": True, **event.data})
+
+        unsub_completed = self.event_bus.subscribe("task.completed", on_done)
+        unsub_failed = self.event_bus.subscribe("task.failed", on_done)
+
+        try:
+            try:
+                result = await asyncio.wait_for(fut, timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[AgentOS] wait_for_task({task_name}[{task_id}]) timeout ({timeout}s)"
+                )
+                return None
+            if result.get("__failed__"):
+                # 去掉內部 marker，回 caller 處理
+                result.pop("__failed__", None)
+            return result
+        finally:
+            unsub_completed()
+            unsub_failed()

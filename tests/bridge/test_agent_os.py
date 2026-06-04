@@ -286,3 +286,159 @@ class TestSessionsLock:
         assert len(sessions) == 10
         for sid in sessions:
             assert len(sessions[sid]) == 10
+
+
+# ==================== EventBus unsubscribe + AgentOS.wait_for_task (v0.3) ====================
+
+class TestEventBusUnsubscribe:
+    @pytest.mark.asyncio
+    async def test_subscribe_returns_unsubscribe_callable(self):
+        bus = EventBus()
+        called = 0
+        async def handler(event):
+            nonlocal called
+            called += 1
+        unsub = bus.subscribe("test", handler)
+        assert callable(unsub)
+
+        await bus.emit(Event(type="test"))
+        assert called == 1
+
+        unsub()
+        await bus.emit(Event(type="test"))
+        assert called == 1  # 取消後不再收到
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_does_not_affect_other_handlers(self):
+        bus = EventBus()
+        a_calls = 0
+        b_calls = 0
+        async def handler_a(event):
+            nonlocal a_calls
+            a_calls += 1
+        async def handler_b(event):
+            nonlocal b_calls
+            b_calls += 1
+        unsub_a = bus.subscribe("ev", handler_a)
+        bus.subscribe("ev", handler_b)
+
+        await bus.emit(Event(type="ev"))
+        assert a_calls == 1
+        assert b_calls == 1
+
+        unsub_a()  # 只取消 a
+        await bus.emit(Event(type="ev"))
+        assert a_calls == 1  # 沒變
+        assert b_calls == 2  # 還在
+
+
+class TestWaitForTask:
+    """AgentOS.wait_for_task() — endpoint 等特定 task 完成用"""
+
+    @pytest.mark.asyncio
+    async def test_returns_completed_event_data(self):
+        os = AgentOS()
+        await os.start(num_workers=1)
+
+        async def my_task():
+            return "task-result"
+
+        task = Task(name="test", coro_factory=my_task)
+        os.enqueue(task)
+        result = await os.wait_for_task("test", task.id, timeout=2.0)
+
+        assert result is not None
+        assert result["task"] == "test"
+        assert result["task_id"] == task.id
+        assert result["result"] == "task-result"
+        assert "duration_ms" in result
+        await os.stop()
+
+    @pytest.mark.asyncio
+    async def test_returns_failed_event_data(self):
+        os = AgentOS()
+        await os.start(num_workers=1)
+
+        async def bad_task():
+            raise ValueError("intentional failure")
+
+        task = Task(name="bad", coro_factory=bad_task)
+        os.enqueue(task)
+        result = await os.wait_for_task("bad", task.id, timeout=2.0)
+
+        assert result is not None
+        assert result["task"] == "bad"
+        assert result["error"] == "intentional failure"
+        # __failed__ marker 已被 wait_for_task 去掉
+        assert "__failed__" not in result
+        await os.stop()
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_none(self):
+        os = AgentOS()
+        await os.start(num_workers=1)
+
+        async def slow_task():
+            import asyncio as _asyncio
+            await _asyncio.sleep(2.0)
+            return "too-late"
+
+        task = Task(name="slow", coro_factory=slow_task)
+        os.enqueue(task)
+        result = await os.wait_for_task("slow", task.id, timeout=0.3)
+        assert result is None
+        # worker 還在跑 task，等停 os 才真正結束
+        await os.stop()
+
+    @pytest.mark.asyncio
+    async def test_filters_by_task_id(self):
+        """同 task name 但不同 id 只 match 自己 — 防止多 request 互卡"""
+        os = AgentOS()
+        await os.start(num_workers=1)
+
+        async def my_task_a():
+            return "result-a"
+
+        async def my_task_b():
+            return "result-b"
+
+        task_a = Task(name="same", coro_factory=my_task_a)
+        os.enqueue(task_a)
+        # 還沒等 a 完成就 enqueue b（雖然 worker 一次一個，但模擬併發情境）
+        task_b = Task(name="same", coro_factory=my_task_b)
+        os.enqueue(task_b)
+
+        # 等 a 的結果
+        result_a = await os.wait_for_task("same", task_a.id, timeout=2.0)
+        assert result_a["result"] == "result-a"
+        assert result_a["task_id"] == task_a.id
+
+        # 等 b 的結果
+        result_b = await os.wait_for_task("same", task_b.id, timeout=2.0)
+        assert result_b["result"] == "result-b"
+        assert result_b["task_id"] == task_b.id
+
+        await os.stop()
+
+
+# ==================== Task.id 唯一性 ====================
+
+class TestTaskId:
+    def test_task_id_auto_generated_unique(self):
+        async def noop():
+            return None
+        ids = {Task(name="t", coro_factory=noop).id for _ in range(100)}
+        assert len(ids) == 100  # 100 個 task 都有唯一 id
+
+    def test_task_id_default_short_hex(self):
+        async def noop():
+            return None
+        t = Task(name="t", coro_factory=noop)
+        # UUID4 hex[:8] = 8 chars
+        assert len(t.id) == 8
+
+    def test_task_id_explicit_override(self):
+        async def noop():
+            return None
+        t = Task(name="t", coro_factory=noop, id="my-custom-id")
+        assert t.id == "my-custom-id"
