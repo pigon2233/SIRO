@@ -288,14 +288,22 @@ HermesBridgeClient:    [拖 Bridge GameObject 進來]
 clickableAreas:
   - area: body
     task: mood.set
-    argsList:
-      - {key: "emotion", stringValue: "happy", type: String}
-      - {key: "intensity", floatValue: 0.8, type: Float}
+    args:
+      - "emotion: happy"
+      - "intensity: 0.8"
   - area: body
     task: chat.say
-    argsList:
-      - {key: "text", stringValue: "點我幹嘛？", type: String}
+    args:
+      - "text: 點我幹嘛？"
 ```
+
+**Args 自動推斷規則**（每行 `key: value`）：
+- `true` / `false` → bool
+- 整數（如 `0`、`42`）→ int
+- 浮點（如 `0.8`、`-1.5`）→ float
+- 其餘 → string
+
+壞行（缺 `:`、空 key）log warning 跳過、不 crash。
 
 **程式碼使用（其他 MonoBehaviour 想 SendTask）**：
 ```csharp

@@ -26,8 +26,15 @@ using Newtonsoft.Json.Linq;
 namespace Siro
 {
     /// <summary>
-    /// persona YAML 的一筆 clickable area 設定
+    /// persona 的一筆 clickable area 設定
     /// inspector 設的（v1.2 MVP）、之後 v1.5+ 改 runtime 從 PersonaApiClient 拿
+    ///
+    /// v1.2 簡化版 args：每行一個 "key: value" 字串、自動推斷型別
+    ///   emotion: happy             → JValue "happy" (string)
+    ///   intensity: 0.8              → JValue 0.8 (double)
+    ///   motion_index: 0             → JValue 0 (int)
+    ///   is_loop: true               → JValue true (bool)
+    /// 比之前 key + 4 種 type + 對應 value 欄位簡單太多
     /// </summary>
     [Serializable]
     public class ClickableArea
@@ -38,47 +45,67 @@ namespace Siro
         [Tooltip(@"要觸發的 task name（mood.set / motion.play / chat.say 等）")]
         public string task;
 
-        [Tooltip("task 的 args、會序列化成 JObject 傳給 SendTaskAsync")]
-        [SerializeField]
-        private List<ArgEntry> argsList = new List<ArgEntry>();
-
-        [Serializable]
-        public class ArgEntry
-        {
-            public string key;
-            public string stringValue;
-            public float floatValue;
-            public ArgType type;
-        }
-
-        public enum ArgType { String, Float, Int, Bool }
+        [Tooltip(@"args 一行一個 key: value、自動推斷型別。範例：
+  emotion: happy
+  intensity: 0.8
+  motion_index: 0
+  is_loop: true
+支援 string / int / float / bool、推斷規則：true/false → bool、能 int 解析 → int、能 float 解析 → float、其餘 → string")]
+        public List<string> args = new List<string>();
 
         /// <summary>
-        /// 從 inspector 設定轉成 JObject
+        /// 從 args 字串 list 解析成 JObject
+        /// 推斷規則：true/false → bool、整數 → int、浮點 → float、其餘 → string
+        /// 壞行 log warning 跳過（不 crash、單筆壞不影響其他）
         /// </summary>
         public JObject ToArgs()
         {
             var obj = new JObject();
-            foreach (var entry in argsList ?? new List<ArgEntry>())
+            if (args == null) return obj;
+            foreach (var raw in args)
             {
-                if (string.IsNullOrEmpty(entry.key)) continue;
-                switch (entry.type)
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var line = raw.Trim();
+                // 支援 "key: value" 跟 "key=value" 兩種寫法
+                int sep = line.IndexOfAny(new[] { ':', '=' });
+                if (sep < 0)
                 {
-                    case ArgType.String:
-                        obj[entry.key] = entry.stringValue ?? "";
-                        break;
-                    case ArgType.Float:
-                        obj[entry.key] = entry.floatValue;
-                        break;
-                    case ArgType.Int:
-                        obj[entry.key] = (int)entry.floatValue;  // 複用 floatValue 欄位存 int
-                        break;
-                    case ArgType.Bool:
-                        obj[entry.key] = entry.floatValue != 0f;
-                        break;
+                    Debug.LogWarning(
+                        $"[ClickableArea] 跳過格式錯誤的 arg {line!r}（要 'key: value' 或 'key=value'）"
+                    );
+                    continue;
                 }
+                var key = line.Substring(0, sep).Trim();
+                var value = line.Substring(sep + 1).Trim();
+                if (string.IsNullOrEmpty(key))
+                {
+                    Debug.LogWarning($"[ClickableArea] 跳過空 key 的 arg: {line!r}");
+                    continue;
+                }
+                obj[key] = ParseValue(value);
             }
             return obj;
+        }
+
+        private static JToken ParseValue(string raw)
+        {
+            // bool
+            if (raw.Equals("true", StringComparison.OrdinalIgnoreCase)) return true;
+            if (raw.Equals("false", StringComparison.OrdinalIgnoreCase)) return false;
+            // int
+            if (int.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                             System.Globalization.CultureInfo.InvariantCulture, out int i))
+            {
+                return i;
+            }
+            // float
+            if (float.TryParse(raw, System.Globalization.NumberStyles.Float,
+                               System.Globalization.CultureInfo.InvariantCulture, out float f))
+            {
+                return f;
+            }
+            // string fallback
+            return raw;
         }
     }
 
@@ -154,13 +181,13 @@ namespace Siro
             if (entry == null)
             {
                 if (verboseLogging) Debug.Log(
-                    $"[PersonaClickHandler] hitArea={hitArea!r} 沒對應 clickable_areas entry（忽略）"
+                    $"[PersonaClickHandler] hitArea={hitArea!} 沒對應 clickable_areas entry（忽略）"
                 );
                 return;
             }
             if (string.IsNullOrEmpty(entry.task))
             {
-                Debug.LogWarning($"[PersonaClickHandler] hitArea={hitArea!r} 沒設 task（忽略）");
+                Debug.LogWarning($"[PersonaClickHandler] hitArea={hitArea!} 沒設 task（忽略）");
                 return;
             }
 
@@ -180,20 +207,20 @@ namespace Siro
             catch (TimeoutException)
             {
                 Debug.LogWarning(
-                    $"[PersonaClickHandler] SendTask {entry.task!r} 超過 {taskTimeoutSec}s 沒回"
+                    $"[PersonaClickHandler] SendTask {entry.task!} 超過 {taskTimeoutSec}s 沒回"
                 );
             }
             catch (SendTaskException ex)
             {
                 Debug.LogWarning(
-                    $"[PersonaClickHandler] SendTask {entry.task!r} 失敗: {ex.Message}"
+                    $"[PersonaClickHandler] SendTask {entry.task!} 失敗: {ex.Message}"
                 );
             }
             catch (OperationCanceledException)
             {
                 // 連線中斷、不算 error（已是 reconnect 中）
                 if (verboseLogging) Debug.Log(
-                    $"[PersonaClickHandler] SendTask {entry.task!r} 因連線中斷取消"
+                    $"[PersonaClickHandler] SendTask {entry.task!} 因連線中斷取消"
                 );
             }
             catch (Exception e)
