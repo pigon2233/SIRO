@@ -29,6 +29,57 @@
 
 ---
 
+## v0.2 觀察（2026-06-04）
+
+**v0.2 用了 Hermes 一個月，發現什麼**：
+
+### 觀察 1 — Streaming 限制（影響體驗）
+
+- Hermes CLI 一次返回完整 response、**不支援 token-by-token streaming**
+- 實測延遲（v0.2 MiniMax-M3 雲端 LLM）：
+  - TTFT（Time To First Token）：5-8 秒（雲端 LLM 現實）
+  - 完整生成：18-20 秒
+  - 給使用者感覺「按下去要等 1 分鐘」
+- 這違反 v0.1 願景「即時互動」
+
+### 觀察 2 — 鎖定代價浮現
+
+- 起初以為「換 LLM provider 簡單」（決策 #001 寫的「不鎖 LLM」）
+- 但實際上是「換 LLM 呼叫方式**難**」 — subprocess 介面本身就是鎖定
+- 想加 streaming，三條路：
+  - A) 繞過 hermes、直接打 MiniMax-M3 HTTP API（1 天實作）
+  - B) 升級到 MCP（協議複雜度上升）
+  - C) 接受現狀
+- 詳見 `docs/STRATEGIC_NOTES.md` Q2 結論
+
+### 觀察 3 — 改用 hermes 介面 streaming（2026-06-04 決定）
+
+- commit 7aa135b 結論：**走 hermes 介面 streaming、不繞過 hermes**
+- 理由：保留 hermes 的「LLM provider 抽象」優勢、用 hermes 的 streaming 介面
+- 修正後取捨：streaming 還是可以達到（透過 hermes 介面）、但成本是要多寫一層 hermes_client 包裝
+- 觀察 1 的體驗問題要等這層寫完才能驗證
+
+### 修正 #001 的「取捨」
+
+原本寫的：
+- ❌ 沒對外 HTTP API
+- ❌ 介面可能隨版本變動
+- ✅ 之後要換：只需改 `bridge/hermes_client.py`
+
+v0.2 後的修正：
+- ❌ 沒原生 streaming（要透過 hermes 介面包裝）
+- ❌ 介面可能隨版本變動（驗證：hermes 0.15.2 → 0.x 介面有 breaking change 過一次）
+- ✅ 換 LLM provider 仍簡單（hermes 抽象）
+- 🟡 換「呼叫方式」成本高（要看 hermes 有沒有對應介面）
+
+### 後續觀察
+
+- 等 hermes_client streaming 寫完，再來更新本節
+- 如果 hermes 介面又 breaking change，要記錄具體影響
+- 持續追蹤 MiniMax-M3 API 直連的成本（如果 < 半天實作就值得繞過）
+
+---
+
 ## 決策 #002 — 為什麼 v0 用 subprocess 而不是 MCP
 
 **日期**：2026-06-02
