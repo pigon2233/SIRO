@@ -3,6 +3,7 @@
 > v0.2+ 設計：把 bridge 從「純 HTTP server」升級成「**像作業系統一樣的後台 + 1 個前台 Mao**」
 >
 > v0.3 進度（2026-06-04）：骨架就緒 → `/chat` opt-in 走 AgentOS（`SIRO_USE_AGENT_OS=true`）。Task 加 `id`、EventBus `subscribe()` 回傳 `unsubscribe()`、新增 `wait_for_task()` helper。預設仍走 v0.2 sync 路徑（165 既有測試不動）。
+> v0.4 進度（2026-06-04）：`SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）。設 `SIRO_USE_AGENT_OS=false` 可降回 v0.2 sync 路徑（逃生用）。
 
 ## 目標
 
@@ -165,7 +166,8 @@ state.agent_os.event_bus.subscribe("task.completed", on_completed)
 - ✅ `EventBus.subscribe()` 回傳 `unsubscribe()` — 避免 handler 殘留
 - ✅ `AgentOS.wait_for_task(name, id, timeout)` — endpoint 等特定 task 完成
 - ✅ `bridge/tasks/llm_reply_task.py` — 真的被 `/chat` 呼叫了（透過 `create_llm_reply_task()` factory）
-- ✅ `state.use_agent_os` — `SIRO_USE_AGENT_OS=true` 才走新路徑，預設 false
+- ✅ `state.use_agent_os` — v0.3 預設 false（opt-in），**v0.4 翻預設 true**（default-on）
+- ✅ `state.use_agent_os` 設 `false` 可降回 v0.2 sync 路徑（逃生用、v0.4 翻預設後重要）
 - ✅ 6 個 EventBus 測試（unsubscribe 不影響別人）+ 4 個 wait_for_task 測試（completed / failed / timeout / id 過濾）+ 3 個 Task.id 測試（唯一性 / 預設長度 / override）+ 4 個 /chat 整合測試
 - ✅ 總計 23 個 AgentOS 測試 + 4 個整合測試 = 27 個
 

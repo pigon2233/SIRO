@@ -318,10 +318,11 @@ Cubism SDK 沒裝好。回 Step 5.3。
 - **K6** TTS — v0.3 沒做語音輸出
 - **K9** 通用易用 — v2 才使用者測試
 
-### v0.3 專屬驗證（不在 K1-K10 內但很重要）
+### v0.3 + v0.4 專屬驗證（不在 K1-K10 內但很重要）
 
 | 項目 | 驗證命令 |
 |---|---|
-| AgentOS 接到 /chat（opt-in）| `SIRO_USE_AGENT_OS=true python -m bridge.main`，看啟動 log 有「`/chat 走 AgentOS: True`」，發 /chat 看 `💬 ... → via=AgentOS` |
-| AgentOS 預設走 v0.2 | 沒設 env，bridge 啟動 log 是「`/chat 走 AgentOS: False`」 |
-| AgentOS 整合測試 | `python -m pytest tests/bridge/test_agent_os_integration.py -v` 4/4 過 |
+| AgentOS 接到 /chat（v0.3 細項）| `SIRO_USE_AGENT_OS=true python -m bridge.main`，看啟動 log 有「`/chat 走 AgentOS: True`」，發 /chat 看 `💬 ... → via=AgentOS` |
+| **AgentOS 預設走 v0.4 路徑** | 沒設 env，bridge 啟動 log 是「`/chat 走 AgentOS: True`」 |
+| **降回 v0.2 sync（逃生）** | `SIRO_USE_AGENT_OS=false python -m bridge.main`，啟動 log 是「`/chat 走 AgentOS: False`」 |
+| AgentOS 整合測試 | `python -m pytest tests/bridge/test_agent_os_integration.py -v` 11/11 過（含 5 個 TestUseAgentOSDefault） |

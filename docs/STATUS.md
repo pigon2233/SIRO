@@ -12,6 +12,7 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 
 - **v0.2**（已完成）：AgentOS 骨架 — Task Queue + Event Bus + Worker Pool + 14 個測試
 - **v0.3**（2026-06-04）：`/chat` opt-in 走 AgentOS（`SIRO_USE_AGENT_OS=true`）。Task 加 `id`、EventBus 改回傳 `unsubscribe()`、新增 `wait_for_task()`。23 個 AgentOS 測試 + 4 個 /chat 整合測試 = 27 個新測試（總計 188）。預設仍走 v0.2 sync 路徑，觀察穩定後 v0.4 預設改 true。
+- **v0.4**（2026-06-04）：`SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）。設 `SIRO_USE_AGENT_OS=false` 可降回 v0.2 sync。新增 5 個 TestUseAgentOSDefault 測試（總計 198 通過）。
 
 ---
 

@@ -2,12 +2,13 @@
 tests/bridge/test_agent_os_integration.py - 端點走 AgentOS 的整合測試
 
 v0.3 PLAN_REVIEW #9: /chat 走 AgentOS（opt-in via SIRO_USE_AGENT_OS env flag）
+v0.4 翻預設：SIRO_USE_AGENT_OS 沒設時 use_agent_os 預設 true（觀察穩定後翻）
 
-行為：
-- flag=false (預設) — 走 v0.2 sync 路徑（state.hermes.chat 直接呼叫）
-- flag=true — 走 v0.3 AgentOS 路徑（enqueue llm_reply_task → wait_for_task）
+行為（v0.4）：
+- env 沒設 / =true (預設) — 走 AgentOS 路徑（enqueue llm_reply_task → wait_for_task）
+- env=false — 走 v0.2 sync 路徑（state.hermes.chat 直接呼叫）
 
-這個檔專門測 flag=true 的路徑。flag=false 既有 test_main.py 已經覆蓋。
+這個檔專門測「env=true / 預設」的路徑。env=false 既有 test_main.py 已經覆蓋。
 
 TestClient 是同步呼叫（用 BackgroundTasks 跑 endpoint 但 event loop 在 client 內），
 不適合測「等 worker 跑完」的 async flow。改用 mock state.agent_os
@@ -168,20 +169,47 @@ class TestChatViaAgentOS:
         assert mock_agent_os_path["enqueue_count"] == 1
 
 
-# ==================== Flag 預設值 ====================
+# ==================== Flag 預設值 (v0.4 翻預設) ====================
 
 class TestUseAgentOSDefault:
-    def test_default_is_false(self, monkeypatch):
-        """沒設 env 時 use_agent_os 預設 false"""
+    """v0.4 翻預設：SIRO_USE_AGENT_OS 沒設時 use_agent_os 預設 true
+
+    v0.3 之前是預設 false（opt-in），v0.4 觀察穩定後翻成 true（default-on）。
+    設 false 可降回 v0.2 sync 路徑 — 給不想要 AgentOS 的人逃生。
+    """
+
+    def test_default_is_true(self, monkeypatch):
+        """v0.4 翻預設：沒設 env 時 use_agent_os 預設 true"""
         monkeypatch.delenv("SIRO_USE_AGENT_OS", raising=False)
-        result = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
+        # 跟 main.py 同步的讀取 pattern
+        result = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
+        assert result is True
+
+    def test_env_false_overrides_default(self, monkeypatch):
+        """v0.4 翻預設後：SIRO_USE_AGENT_OS=false 可降回 v0.2 sync"""
+        monkeypatch.setenv("SIRO_USE_AGENT_OS", "false")
+        result = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
         assert result is False
 
     def test_env_true_sets_to_true(self, monkeypatch):
         """SIRO_USE_AGENT_OS=true 時 use_agent_os = true"""
         monkeypatch.setenv("SIRO_USE_AGENT_OS", "true")
-        result = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
+        result = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
         assert result is True
+
+    def test_env_truthy_values_set_to_true(self, monkeypatch):
+        """TRUE / True / true 都算 true（case-insensitive 比對）"""
+        for truthy in ["true", "True", "TRUE"]:
+            monkeypatch.setenv("SIRO_USE_AGENT_OS", truthy)
+            result = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
+            assert result is True, f"{truthy!r} should be truthy"
+
+    def test_env_falsy_values_set_to_false(self, monkeypatch):
+        """false / False / FALSE / 其他字串 都算 false（只有 .lower()=="true" 才 truthy）"""
+        for falsy in ["false", "False", "FALSE", "yes", "0", "", "anything-else"]:
+            monkeypatch.setenv("SIRO_USE_AGENT_OS", falsy)
+            result = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
+            assert result is False, f"{falsy!r} should be falsy"
 
 
 # ==================== /ws 走 AgentOS (v0.3 細項) ====================

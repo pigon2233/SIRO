@@ -97,11 +97,12 @@ class BridgeState:
         # v0.2+：AgentOS — task queue + event bus + worker pool
         # bridge 是「後台作業系統」: 跟 Mao 對話同時可以跑排程、Telegram、stock query
         self.agent_os = None  # type: Optional[AgentOS]  # 在 lifespan 內啟動
-        # v0.3：/chat /ws 是否走 AgentOS task queue 的開關
-        # 預設 false（保持 v0.2 的 sync 行為，165 個測試不用改）
-        # 設 true 後 /chat 改成 enqueue → wait_for_task 的 flow
-        # v0.3 觀察穩定後 v0.4 預設改 true
-        self.use_agent_os = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
+        # v0.4：/chat /ws 是否走 AgentOS task queue 的開關
+        # 預設 true（v0.3 觀察穩定後 v0.4 翻預設）
+        # 設 false 可降回 v0.2 sync 路徑（向後相容、給不想要 AgentOS 的人逃生）
+        # v0.3 之前是預設 false — 188 既有測試在 v0.3 用 enable_agent_os fixture 強制 true
+        # v0.4 翻預設後那些 fixture 變成冗餘、但保留不破壞測試可讀性
+        self.use_agent_os = os.environ.get("SIRO_USE_AGENT_OS", "true").lower() == "true"
         # v0.3.1：/chat /ws 是否走 MiniMax-M3 SSE streaming（STRATEGIC_NOTES Q2 選項 B）
         # 預設 false（保持 v0.2 sync、165 既有測試不動）
         # 設 true 後 /ws 推 {"type":"delta", "text":"..."} 增量訊息、
@@ -214,7 +215,7 @@ async def lifespan(app: FastAPI):
     state.agent_os = AgentOS()
     await state.agent_os.start(num_workers=3)
     logger.info("  AgentOS 啟動（3 個 worker，task queue + event bus 就緒）")
-    logger.info(f"  /chat 走 AgentOS: {state.use_agent_os}（SIRO_USE_AGENT_OS env 控制）")
+    logger.info(f"  /chat 走 AgentOS: {state.use_agent_os}（v0.4 預設 true、SIRO_USE_AGENT_OS=false 可降回 v0.2 sync）")
     logger.info(
         f"  /ws 走 SSE streaming: {state.use_streaming}（SIRO_STREAMING env 控制）"
     )
