@@ -197,7 +197,11 @@ state.agent_os.event_bus.subscribe("task.completed", on_completed)
 
 ---
 
-## v1.2 SendTask + OnClick 規格（v1.2 規劃文件 — 2026-06-04 寫）
+## v1.2 SendTask + OnClick（v1.2 規格 + 實作 — 2026-06-04 寫 + 做完）
+
+> 規格段：見下方。實作狀態（2026-06-04 完）：bridge 端 ✅（commit 7f2d4f7、12 個 test_sendtask.py）、Unity 端 ✅（commit 91b5dec SendTaskAsync、commit 5fc448d OnMaoClicked + PersonaClickHandler、commit 0a2ab7d Tooltip 修）。
+> 測試結果：210 過 / 1 skip（v1.2 不擋 duplicate task_id、留 v2.0 持久化時實作）。
+> 下一步：Unity Play 模式手動驗證（bridge 開、Unity 點 Mao、log 看到 SendTask 來回）。
 
 > 目的：Unity 不只能「等回應」（`/chat` response 訊息），還能「**主動推 task 進 AgentOS**」做後續操作。
 > 場景：點 Mao 頭 → 觸發 `mood.set happy` → bridge 設 Mao 情緒、下次 chat 用新 mood。
@@ -275,7 +279,49 @@ public event Action<string> OnMaoClicked;  // 參數：hit area name
   - 未知 task name → `task_failed` error="unknown task"
   - 同 task_id 送兩次 → 第二個被 reject（避免 race）
 
-### 6. 實作順序（建議）
+### 6. Unity 端使用範例（v1.2）
+
+**Inspector 設定（PersonaClickHandler 組件）**：
+```
+Live2DModelController: [拖 Mao GameObject 進來]
+HermesBridgeClient:    [拖 Bridge GameObject 進來]
+clickableAreas:
+  - area: body
+    task: mood.set
+    argsList:
+      - {key: "emotion", stringValue: "happy", type: String}
+      - {key: "intensity", floatValue: 0.8, type: Float}
+  - area: body
+    task: chat.say
+    argsList:
+      - {key: "text", stringValue: "點我幹嘛？", type: String}
+```
+
+**程式碼使用（其他 MonoBehaviour 想 SendTask）**：
+```csharp
+// 找 bridge 參考
+var bridge = FindFirstObjectByType<HermesBridgeClient>();
+
+// Fire-and-await：等 task 跑完、拿 result
+try {
+    var result = await bridge.SendTaskAsync("persona.switch",
+        new JObject { ["persona_id"] = "another-persona" });
+    Debug.Log($"persona 切換成功：{result["name"]}");
+} catch (TimeoutException) { /* 5s 沒回、UX 顯示「卡住了」*/ }
+catch (SendTaskException ex) { /* task handler 失敗、ex.Message 是 error */ }
+catch (OperationCanceledException) { /* 連線中斷、bridge 會自動重連 */ }
+
+// Fire-and-forget：不等 result、用 event 收
+bridge.OnTaskResult += r => Debug.Log($"task {r.task_id} 完成了");
+bridge.OnTaskFailed += f => Debug.LogError($"task {f.task_id} 失敗: {f.error}");
+```
+
+**Mao prefab 必備**：
+1. 2D Collider（或 Image with Raycast Target = true）— 收 OnPointerClick
+2. `Live2DModelController` component — 觸發 OnMaoClicked
+3. `PersonaClickHandler` component — 訂閱 OnMaoClicked、叫 SendTaskAsync
+
+### 7. 跟現有 WS protocol 的關係
 
 1. bridge 端 WS message handler（接 `task`、推 ack/result/failed）— 0.5 天
 2. AgentOS 內建 `task` registry（內建 mood.set / motion.play / persona.switch / chat.say / chat.summon）— 0.5 天
@@ -286,11 +332,31 @@ public event Action<string> OnMaoClicked;  // 參數：hit area name
 
 **總計 ~3 天**（半天細項不計）
 
-### 7. 跟現有 WS protocol 的關係
+### 8. 跟現有 WS protocol 的關係
 
 - 純 additive（加新 type、不改既有 message）
 - 跟 v0.4+ commit 0dd9da7（incremental render）**互不影響** — 方向相反
 - 跟 v0.3 `task` 在 AgentOS 內部已存在（`create_llm_reply_task`）— WS `task` 是新介面、內部還是 `state.agent_os.enqueue(InternalTask)`
+
+### 9. v1.2 實作狀態（2026-06-04 完）
+
+| 子項 | 狀態 | commit | 測試 |
+|---|---|---|---|
+| bridge 端 `bridge/tasks/registry.py` | ✅ | `7f2d4f7` | — |
+| bridge 端 `bridge/tasks/builtin.py`（5 個 handler）| ✅ | `7f2d4f7` | 12 個 test_sendtask.py |
+| bridge 端 `bridge/main.py` WS handler | ✅ | `7f2d4f7` | 含 task_ack/result/failed |
+| Unity 端 `HermesBridgeClient.SendTaskAsync` | ✅ | `91b5dec` | — |
+| Unity 端 `Live2DModelController.OnMaoClicked` | ✅ | `5fc448d` | — |
+| Unity 端 `PersonaClickHandler` | ✅ | `5fc448d` | — |
+| Unity 端 Tooltip 編譯修 | ✅ | `0a2ab7d` | — |
+
+**測試結果**：210 過 / 1 skip（v1.2 不擋 duplicate task_id、留 v2.0 持久化時實作）
+
+**未做（v1.5+ 留）**：
+- persona clickable_areas runtime 從 PersonaApiClient 拉（目前 inspector 手填）
+- 精確 head/body 點擊區分（v1.2 一律 "body"、v1.5+ 用 CubismHitDrawable）
+- LLM tool calling（Mao 主動召喚任務）
+- Task 持久化（v2.0 + 任務 queue 重連後 replay）
 
 ## 跟 Mao 對話的內部流程（v0.2 vs v0.3）
 

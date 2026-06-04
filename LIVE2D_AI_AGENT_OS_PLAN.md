@@ -469,6 +469,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 | **v0.3.1** | ✅   | SSE streaming 基礎建設（MiniMaxStreamingClient + /ws 推 delta）           | `99de74c` `d96351b`                     |
 | **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試 | `c1a3dc5`                              |
 | **v0.4+**  | ✅   | Unity 端 incremental render（接 /ws 的 delta 訊息，**提前於 v1+ 規劃做**— 詳見 STRATEGIC_NOTES.md Q2）| `0dd9da7`                              |
+| **v1.2**   | ✅   | SendTask + OnClick：bridge 5 個 built-in task + registry + WS handler + Unity SendTaskAsync + OnMaoClicked + PersonaClickHandler | `7f2d4f7` `91b5dec` `5fc448d` `0a2ab7d` |
 
 **交付物**（混合：v0.3 完成的 + 仍待做的）：
 
@@ -482,11 +483,11 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  K8 fallback 量化（< 3s assertion）
 - [X]  `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.4 翻預設、逃生 `=false`）
 - [X]  Unity 端 incremental render 接 /ws delta 訊息（**v0.4+ 提前做**，原本規劃 v1+ 一起做 — 詳見 STRATEGIC_NOTES Q2）
+- [X]  **v1.2** SendTask + OnClick（Unity 推 task 進 AgentOS、`Live2DModelController.OnMaoClicked` + `PersonaClickHandler` 串接、5 個 built-in：mood.set / motion.play / persona.switch / chat.say / chat.summon）
 - [ ]  `Live2DModelController` 表情過渡動畫（⏸ 暫停）
-- [ ]  點擊 Mao motion（⏸ 暫停）
+- [ ]  點擊 Mao motion（⏸ 暫停 — v1.2 MVP 不分 hit area，v1.5+ 用 CubismHitDrawable）
 - [ ]  Loading 狀態視覺（⏸ 暫停）
 - [ ]  截圖功能（⏸ 暫停）
-- [ ]  **v1+** SendTask + OnClick（讓 Unity 推 task 進 AgentOS，跟 #5 incremental render 方向不同）
 
 **驗收條件**（對應 KPI）：
 
@@ -498,13 +499,13 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）（⏸ 暫停）
 - [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
-**預估時間**：剩餘 ~1 週（4 個視覺項目 + 1 個 v1+ SendTask）
+**預估時間**：剩餘 ~1 週（4 個視覺項目）
 **依賴**：Phase 1.5 ✅
 **風險**：
 
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
-- 🟢 Unity incremental render 已在 v0.4+ 提前做（commit 0dd9da7），v1+ SendTask 仍待規劃（不同方向、wire 互不影響）
+- 🟢 Unity incremental render（v0.4+）+ SendTask（v1.2）都完成；剩 4 個視覺項目 + 1 個 SendTask 細化（v1.5+ LLM tool calling、v2.0 持久化）
 
 ---
 
@@ -1076,6 +1077,7 @@ AI 拿到任何一個 Phase 的 spec，可以獨立完成其中的子任務。
 
 | 日期       | 版本   | 變更                                                                                                                                |
 | ---------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端 `SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅ |
 | 2026-06-04 | v3.2   | v1+ Roadmap 段：加 SendTask + OnClick 完整規格（WS message 格式、C# API、task 種類、驗收條件、實作順序）放 AGENT_OS.md、PLAN.md 引用 |
 | 2026-06-04 | v3.1   | v0.4 翻預設：`SIRO_USE_AGENT_OS` 預設從 false 改 true（逃生 `=false`）、v0.x 子表 v0.4 ✅、視覺設定檔 v0.3 ✅、test count 190 → 198 |
 | 2026-06-04 | v3.0   | 對齊 v0.3 實況：Phase 0 改 ✅ 完成、Phase 2 改 🟡 進行中（v0.3.1）、Phase 2 加 v0.x 進度子表、test count 78 → 190、加 cross-ref 段 |
