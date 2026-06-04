@@ -38,6 +38,7 @@ from .hermes_client import HermesClient
 from .ollama_client import OllamaClient
 from .agent_os import AgentOS, Event  # v0.2+ 後台作業系統
 from .tasks import create_llm_reply_task  # v0.3 AgentOS 接 endpoint
+from .tasks import get_task, register_builtin_tasks  # v1.2 SendTask infra
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -119,6 +120,13 @@ class BridgeState:
         # 用 RLock 支援 nested lock
         import threading
         self.sessions_lock = threading.RLock()
+        # v1.2+：SendTask state（mood.set / motion.play / persona.switch 寫進來）
+        # current_mood: {user_id: {emotion, intensity, set_at}}
+        # last_motion: list of recent motion 觸發記錄（給 debug / 監控用）
+        # active_persona: 當前 Unity active 的 persona（persona.switch 更新）
+        self.current_mood: dict = {}
+        self.last_motion: list = []
+        self.active_persona: str = "siro-default"
 
 
 state = BridgeState()
@@ -224,12 +232,99 @@ async def lifespan(app: FastAPI):
             f"  MiniMaxStreamingClient is_available: {state.streaming_client.is_available}"
         )
 
+    # v1.2+：註冊 SendTask 內建 task handlers
+    # mood.set / motion.play / persona.switch / chat.say / chat.summon
+    register_builtin_tasks()
+    from .tasks import list_tasks as _list_tasks
+    logger.info(f"  SendTask 已註冊 {len(_list_tasks())} 個 built-in：{_list_tasks()}")
+
     yield
 
     # 關閉
     if state.agent_os:
         await state.agent_os.stop()
     logger.info("🛑 SIRO Bridge 關閉")
+
+
+# ==================== v1.2 SendTask helper ====================
+
+async def _handle_sendtask(websocket: WebSocket, data: dict) -> None:
+    """
+    v1.2 SendTask handler — 在 WS 收到 {"type": "task", ...} 時呼叫
+
+    流程：
+    1. 驗 task_id 格式（client 應傳 UUID4 hex[:8]）
+    2. 查 registry、有 → 推 task_ack；無 → 推 task_failed（error: unknown task）
+    3. 用 asyncio.create_task 跑 handler（不卡 WS 接收 loop）
+    4. 跑完推 task_result 或 task_failed
+
+    為什麼用 create_task 不直接 await：
+    - WS 接收 loop 不能被慢 task 卡住（要能繼續收 ping、其他 chat）
+    - 規格 §1：handler 簽名 async (args, ctx) -> result
+    - inline 跑是 v1.2 簡化版：v1.5+ 慢 task 走 AgentOS queue（持久化 + worker pool）
+    """
+    task_id = data.get("task_id", "")
+    name = data.get("name", "")
+    args = data.get("args", {})
+    user_id = data.get("user_id", "default")
+
+    # task_id 驗證（8 字 hex = UUID4 hex[:8] 格式）
+    if not task_id or not isinstance(task_id, str) or len(task_id) != 8:
+        await websocket.send_json({
+            "type": "error",
+            "detail": f"task 訊息缺 task_id 或格式錯（要 8 字 hex）：{task_id!r}",
+        })
+        return
+
+    # 查 handler
+    handler = get_task(name)
+    if handler is None:
+        from .tasks import list_tasks as _list
+        await websocket.send_json({
+            "type": "task_failed",
+            "task_id": task_id,
+            "error": f"unknown task: {name!r}（available: {_list()})",
+        })
+        logger.warning(f"[SendTask] 未知 task: {name!r}（task_id={task_id}）")
+        return
+
+    # 推 ack
+    await websocket.send_json({
+        "type": "task_ack",
+        "task_id": task_id,
+        "status": "accepted",
+    })
+
+    # 背景跑 handler
+    ctx = {
+        "state": state,
+        "user_id": user_id,
+        "task_id": task_id,
+    }
+    logger.info(f"[SendTask] 接 task: {name} args={args} (task_id={task_id})")
+
+    async def _run_and_reply():
+        try:
+            result = await handler(args, ctx)
+            await websocket.send_json({
+                "type": "task_result",
+                "task_id": task_id,
+                "result": result,
+            })
+            logger.info(f"[SendTask] task 完成: {name} (task_id={task_id})")
+        except Exception as e:
+            logger.exception(f"[SendTask] task 失敗: {name} (task_id={task_id}): {e}")
+            try:
+                await websocket.send_json({
+                    "type": "task_failed",
+                    "task_id": task_id,
+                    "error": f"{type(e).__name__}: {e}",
+                })
+            except Exception:
+                # WS 可能已斷線，silently ignore
+                pass
+
+    asyncio.create_task(_run_and_reply())
 
 
 # ==================== App ====================
@@ -978,6 +1073,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     "live2d": live2d_signal.model_dump(),
                     "session_id": session_id,
                 })
+
+            elif msg_type == "task":
+                # v1.2 SendTask：Unity 主動推 task 進 bridge
+                # 規格：docs/AGENT_OS.md v1.2 段
+                # 流程：
+                #   1. 收 {"type":"task", "task_id":"...", "name":"...", "args":{...}}
+                #   2. 查 registry、有 → 推 task_ack；無 → 推 task_failed
+                #   3. 跑 handler（inline，asyncio.create_task 不卡 WS 接收 loop）
+                #   4. 跑完推 task_result 或 task_failed
+                await _handle_sendtask(websocket, data)
+                continue
 
             else:
                 await websocket.send_json({
