@@ -37,6 +37,7 @@ from .emotion_parser import EmotionParser
 from .hermes_client import HermesClient
 from .ollama_client import OllamaClient
 from .agent_os import AgentOS, Event  # v0.2+ 後台作業系統
+from .tasks import create_llm_reply_task  # v0.3 AgentOS 接 endpoint
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -94,6 +95,11 @@ class BridgeState:
         # v0.2+：AgentOS — task queue + event bus + worker pool
         # bridge 是「後台作業系統」: 跟 Mao 對話同時可以跑排程、Telegram、stock query
         self.agent_os = None  # type: Optional[AgentOS]  # 在 lifespan 內啟動
+        # v0.3：/chat /ws 是否走 AgentOS task queue 的開關
+        # 預設 false（保持 v0.2 的 sync 行為，165 個測試不用改）
+        # 設 true 後 /chat 改成 enqueue → wait_for_task 的 flow
+        # v0.3 觀察穩定後 v0.4 預設改 true
+        self.use_agent_os = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
         # v0.2+：sessions_lock 保護多 thread / 多 request 並行讀寫
         # 雖然單 process + asyncio 已經序列化大部分 access，但
         # 1. tasks 在 worker thread pool（to_thread）執行
@@ -197,6 +203,7 @@ async def lifespan(app: FastAPI):
     state.agent_os = AgentOS()
     await state.agent_os.start(num_workers=3)
     logger.info("  AgentOS 啟動（3 個 worker，task queue + event bus 就緒）")
+    logger.info(f"  /chat 走 AgentOS: {state.use_agent_os}（SIRO_USE_AGENT_OS env 控制）")
 
     yield
 
@@ -494,14 +501,78 @@ async def chat(req: ChatRequest) -> ChatResponse:
     system_prompt = get_personality(persona_name)
     t_history = time.time() - t0
 
-    # 段 4: 呼叫 Hermes（用 to_thread 把 subprocess 跑在 thread pool）
+    # 段 4: 呼叫 LLM — v0.3 兩條路徑
+    #   A. SIRO_USE_AGENT_OS=true → enqueue AgentOS task，await wait_for_task()
+    #   B. false (預設) → 直接 asyncio.to_thread(state.hermes.chat) 走 v0.2 路徑
     t0 = time.time()
-    result = await asyncio.to_thread(
-        state.hermes.chat,
-        message=user_message_with_context,
-        system_prompt=system_prompt,
-    )
-    t_hermes = time.time() - t0
+    if state.use_agent_os and state.agent_os:
+        # v0.3 AgentOS 路徑：enqueue task + 等 event bus
+        # llm_reply_task 已經做了 history + parse + live2d signal，
+        # /chat 這邊只負責「收結果 + 組 ChatResponse」
+        task = create_llm_reply_task(
+            state=state,
+            user_id=req.user_id,
+            message=req.message,
+            persona_name=persona_name,
+            session_id=session_id,
+        )
+        state.agent_os.enqueue(task)
+        logger.info(f"⏱ [chat] enqueue task id={task.id} → 走 AgentOS")
+        agent_result = await state.agent_os.wait_for_task(
+            "llm.reply", task.id, timeout=600.0,
+        )
+        t_hermes = time.time() - t0
+        if agent_result is None:
+            return await _make_fallback_response(
+                user_id=req.user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=persona_name,
+                error_detail="LLM timeout via AgentOS",
+                user_message=req.message,
+            )
+        if "error" in agent_result:
+            return await _make_fallback_response(
+                user_id=req.user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=persona_name,
+                error_detail=agent_result["error"],
+                user_message=req.message,
+            )
+        # 成功 — task 已經做完所有事（包括 history 寫入、parse、live2d signal），
+        # 結果在 agent_result["result"] 內（_execute_task 把 llm_reply_task 的 return 包成 "result"）
+        result = agent_result["result"]
+        t1 = time.time()
+        chat_response = ChatResponse(
+            text=result["text"],
+            emotion=Emotion(result["emotion"]),
+            intensity=result["intensity"],
+            live2d=Live2DSignal(**result["live2d"]),
+            session_id=result["session_id"],
+            user_id=req.user_id,
+            raw_response=result.get("raw_response"),
+        )
+        t_parse = time.time() - t1
+        logger.info(
+            f"💬 user={req.message[:40]!r} → llm={result.get('text','')[:80]!r} → emotion={result['emotion']} "
+            f"[⏱分段: via=AgentOS parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+            f"history={t_history*1000:.0f}ms task_in_queue={t_hermes*1000:.0f}ms parse={t_parse*1000:.0f}ms "
+            f"total={(time.time()-t_total_start)*1000:.0f}ms]"
+        )
+        # 段 6 之前：寫歷史（v0.2+ RLock 保護）
+        # 注意：llm_reply_task 已經自己寫過 history，這裡要重複嗎？檢查 — 不重複，
+        # task 內的 history 寫入是用同個 session_id 跟同一個 state.sessions_lock，
+        # 再寫一次會 duplicate。**故意跳過**。
+        return chat_response
+    else:
+        # v0.2 sync 路徑（預設）
+        result = await asyncio.to_thread(
+            state.hermes.chat,
+            message=user_message_with_context,
+            system_prompt=system_prompt,
+        )
+        t_hermes = time.time() - t0
 
     if not result.success:
         # 降級而非 502：使用者看到「嗯..."而不是「Internal Server Error」
