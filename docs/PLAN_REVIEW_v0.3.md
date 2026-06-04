@@ -214,21 +214,21 @@ phase_3_os_layer:
 
 ---
 
-## 給未來自己的修訂清單（整理完才動手）
+## 給未來自己的修訂清單（全部完成 2026-06-04）
 
-| 優先 | 項目 | 動作 | commit 名 |
-|---|---|---|---|
-| 🔴 | #17 is_available cache 5s | 修 `bridge/hermes_client.py` + `bridge/ollama_client.py` | `fix(perf): is_available 5s cache 拿掉 hot path sync subprocess` |
-| 🔴 | A. STRATEGIC_NOTES 改 Q2 結論 | 改文件 | `docs: STRATEGIC_NOTES Q2 改走 hermes gateway 不繞過` |
-| 🟠 | #19 AGENT_OS.md 補現況段 | 改文件 | `docs: AGENT_OS.md 加現況 — task 還沒被 endpoint 用` |
-| 🟠 | C. STATUS.md 改 v0.x 編號 | 改文件 | `docs: STATUS.md 改用 v0.x 編號對齊 v2.1 路線圖` |
-| 🟠 | D. SETUP_NOTES 各 Phase 加 KPI | 改文件 | `docs: SETUP_NOTES 各 Phase 加驗證命令 (K1-K7)` |
-| 🟠 | B. ARCHITECTURE.md 改 v0.3 標頭 | 改文件 | `docs: ARCHITECTURE.md 標頭改 v0.3 願景保留 OS` |
-| 🟠 | E. os/ 跟 hardware/ 補 Phase 3 規劃 | 寫 README 補章節 | `docs: os/ hardware/ 補 Phase 3 詳細規劃` |
-| 🟠 | A. DECISIONS.md #001 加 v0.2 觀察 | 改文件 | `docs: DECISIONS #001 加 v0.2 streaming 觀察` |
-| 🟠 | #16 AgentOS 接 endpoint | 改 `main.py` 跟測試 | `feat(bridge): /chat /ws 改走 AgentOS enqueue` |
-| 🟢 | #18 STRATEGIC_NOTES 加 cross-ref | 改文件 | `docs: STRATEGIC_NOTES 加 v2.1 cross-reference` |
-| 🟢 | F. 等 v3.0 合併 | 留著不動 | — |
+| 優先 | 項目 | 動作 | commit | 狀態 |
+|---|---|---|---|---|
+| 🔴 | #17 is_available cache 5s | 修 `bridge/hermes_client.py` + `bridge/ollama_client.py` | `fa9bf63` | ✅ |
+| 🔴 | A. STRATEGIC_NOTES 改 Q2 結論 | 改文件 | `7aa135b` | ✅ |
+| 🟠 | #19 AGENT_OS.md 補現況段 | 改文件 | `0066b56` | ✅ |
+| 🟠 | C. STATUS.md 改 v0.3 編號 | 改文件 | `a528e6f` | ✅ |
+| 🟠 | D. SETUP.md 各 Phase 加 KPI（K1-K7）| 改文件 | `8ffa8f0` | ✅ |
+| 🟠 | B. ARCHITECTURE.md 改 v0.3 標頭 | 改文件 | `9e21653` | ✅ |
+| 🟠 | E. os/ 跟 hardware/ 補詳細規劃 | 寫 README 補章節 | `00423e4` `ef7ef41` `007f04c` `522f530` | ✅（拆 4 個 commit）|
+| 🟠 | A. DECISIONS.md #001 加 v0.2 觀察 | 改文件 | `f5d795e` | ✅ |
+| 🟠 | #16 AgentOS 接 endpoint | 改 `main.py` 跟測試 | `73b78b8` `6698fa6` `da28d9f` `8936d54` | ✅（拆 4 個 commit）|
+| 🟢 | #18 STRATEGIC_NOTES 加 cross-ref | 改文件 | `fb5440d` | ✅ |
+| 🟢 | F. 等 v3.0 合併主計畫書 | 留著不動 | — | 🟢 留著 |
 
 ---
 
