@@ -182,3 +182,116 @@ class TestUseAgentOSDefault:
         monkeypatch.setenv("SIRO_USE_AGENT_OS", "true")
         result = os.environ.get("SIRO_USE_AGENT_OS", "false").lower() == "true"
         assert result is True
+
+
+# ==================== /ws 走 AgentOS (v0.3 細項) ====================
+
+class TestWebSocketViaAgentOS:
+    """/ws WebSocket 端點也 opt-in 走 AgentOS（跟 /chat 平行）
+
+    用 TestClient.websocket_connect 跑真的 WS 連線（不是 mock）。
+    mock state.agent_os.enqueue / wait_for_task — 不實際跑 task coroutine
+    避免 TestClient sync portal 跟 worker event loop 互鎖。
+    """
+
+    def test_ws_flag_on_enqueues_and_sends_response(
+        self, client, mock_hermes_setup, enable_agent_os, monkeypatch
+    ):
+        """flag=true 時 /ws 應該 enqueue + 透過 AgentOS 拿 result 推回 client"""
+        captured = {"enqueue_count": 0, "task_ids": []}
+
+        def fake_enqueue(task: Task) -> None:
+            captured["enqueue_count"] += 1
+            captured["task_ids"].append(task.id)
+
+        async def fake_wait_for_task(task_name, task_id, *, timeout=600.0):
+            if task_name == "llm.reply":
+                return {
+                    "task": "llm.reply",
+                    "task_id": task_id,
+                    "result": {
+                        "status": "ok",
+                        "session_id": f"ws-test-{task_id}",
+                        "user_id": "ws-test",
+                        "text": "WS AgentOS 你好！",
+                        "emotion": "happy",
+                        "intensity": 0.7,
+                        "live2d": {
+                            "expression_id": "exp_01",
+                            "motion_group": "Idle",
+                            "motion_index": 0,
+                            "intensity": 0.7,
+                            "duration_ms": 500,
+                        },
+                        "raw_response": "[emotion:happy] WS AgentOS 你好！",
+                    },
+                    "duration_ms": 100.0,
+                }
+            return None
+
+        mock = MagicMock(spec=AgentOS)
+        mock.enqueue = fake_enqueue
+        mock.wait_for_task = fake_wait_for_task
+
+        original = state.agent_os
+        state.agent_os = mock
+        try:
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({
+                    "type": "chat",
+                    "message": "WS AgentOS 測試",
+                    "user_id": "ws-test",
+                })
+
+                data = ws.receive_json()
+                assert data["type"] == "response"
+                assert data["text"] == "WS AgentOS 你好！"
+                assert data["emotion"] == "happy"
+                assert "live2d" in data
+
+                # 確認有 enqueue 到 AgentOS
+                assert captured["enqueue_count"] == 1
+                assert len(captured["task_ids"]) == 1
+                # task id 是 8 字 hex (UUID4 hex[:8])
+                assert len(captured["task_ids"][0]) == 8
+        finally:
+            state.agent_os = original
+
+    def test_ws_flag_on_hermes_failure_triggers_fallback_over_ws(
+        self, client, mock_hermes_setup, enable_agent_os
+    ):
+        """AgentOS 路徑下 hermes 失敗 → 走 fallback over WS（連線不中斷）"""
+        async def fake_wait_for_task(task_name, task_id, *, timeout=600.0):
+            return {
+                "task": "llm.reply",
+                "task_id": task_id,
+                "error": "WS hermes 模擬失敗",
+                # 沒有 "result" key → 視為 task.failed
+            }
+
+        mock = MagicMock(spec=AgentOS)
+        mock.enqueue = lambda t: None
+        mock.wait_for_task = fake_wait_for_task
+
+        original = state.agent_os
+        state.agent_os = mock
+        try:
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json({
+                    "type": "chat",
+                    "message": "test",
+                    "user_id": "ws-test",
+                })
+
+                data = ws.receive_json()
+                # 失敗應該 fallback，response 而不是 error
+                assert data["type"] == "response"
+                assert isinstance(data["text"], str)
+                assert len(data["text"]) > 0
+
+                # 連線還能繼續用（ping/pong）
+                ws.send_json({"type": "ping"})
+                pong = ws.receive_json()
+                assert pong["type"] == "pong"
+        finally:
+            state.agent_os = original

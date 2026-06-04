@@ -639,6 +639,12 @@ async def websocket_endpoint(websocket: WebSocket):
     - Bridge 內部沒初始化 → 關連線（這是 bug）
     - Hermes 不可用 → 維持連線，每次 chat 都回 fallback response（Mao 切 thinking）
     - Hermes chat 失敗 → 同上
+
+    v0.3 細項：opt-in 走 AgentOS
+    - SIRO_USE_AGENT_OS=true → /ws 跟 /chat 一樣 enqueue AgentOS task、wait_for_task 拿結果
+    - 跟 /chat 共用 `create_llm_reply_task()` factory（無重複）
+    - 預設 false（行為跟 v0.2 相同、165+ 既有測試不動）
+    - Timeout / failed 都走 fallback response、WS 連線不中斷
     """
     await websocket.accept()
     logger.info(f"🔌 WebSocket 連線: {websocket.client}")
@@ -705,6 +711,80 @@ async def websocket_endpoint(websocket: WebSocket):
                         "intensity": fallback.intensity,
                         "live2d": fallback.live2d.model_dump(),
                         "session_id": fallback.session_id,
+                    })
+                    continue
+
+                # v0.3 段 4 兩條路徑（跟 /chat 對齊）：
+                #   A. SIRO_USE_AGENT_OS=true → enqueue AgentOS task，await wait_for_task()
+                #   B. false (預設) → 直接 asyncio.to_thread(state.hermes.chat) 走 v0.2 路徑
+                t0 = time.time()
+                if state.use_agent_os and state.agent_os:
+                    # v0.3 AgentOS 路徑：/ws 跟 /chat 走同一個 llm_reply_task factory
+                    task = create_llm_reply_task(
+                        state=state,
+                        user_id=user_id,
+                        message=message,
+                        persona_name=personality,
+                        session_id=session_id,
+                    )
+                    state.agent_os.enqueue(task)
+                    logger.info(f"⏱ [ws] enqueue task id={task.id} → 走 AgentOS")
+                    agent_result = await state.agent_os.wait_for_task(
+                        "llm.reply", task.id, timeout=600.0,
+                    )
+                    t_hermes = time.time() - t0
+                    if agent_result is None:
+                        fallback = await _make_fallback_response(
+                            user_id=user_id,
+                            session_id=session_id,
+                            category="error",
+                            persona_name=personality,
+                            error_detail="LLM timeout via AgentOS",
+                            user_message=message,
+                        )
+                        await websocket.send_json({
+                            "type": "response",
+                            "text": fallback.text,
+                            "emotion": fallback.emotion.value,
+                            "intensity": fallback.intensity,
+                            "live2d": fallback.live2d.model_dump(),
+                            "session_id": fallback.session_id,
+                        })
+                        continue
+                    if "error" in agent_result:
+                        fallback = await _make_fallback_response(
+                            user_id=user_id,
+                            session_id=session_id,
+                            category="error",
+                            persona_name=personality,
+                            error_detail=agent_result["error"],
+                            user_message=message,
+                        )
+                        await websocket.send_json({
+                            "type": "response",
+                            "text": fallback.text,
+                            "emotion": fallback.emotion.value,
+                            "intensity": fallback.intensity,
+                            "live2d": fallback.live2d.model_dump(),
+                            "session_id": fallback.session_id,
+                        })
+                        continue
+                    # 成功 — task 已經做完 history + parse + live2d signal，
+                    # 結果在 agent_result["result"] 內
+                    result = agent_result["result"]
+                    t_ws_total = (time.time() - t_ws_total) * 1000
+                    logger.info(
+                        f"💬 [ws] user={message[:40]!r} → llm={result.get('text','')[:80]!r} → emotion={result['emotion']} "
+                        f"[⏱分段: via=AgentOS parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+                        f"task_in_queue={t_hermes*1000:.0f}ms total={t_ws_total:.0f}ms]"
+                    )
+                    await websocket.send_json({
+                        "type": "response",
+                        "text": result["text"],
+                        "emotion": result["emotion"],
+                        "intensity": result["intensity"],
+                        "live2d": result["live2d"],
+                        "session_id": result["session_id"],
                     })
                     continue
 
