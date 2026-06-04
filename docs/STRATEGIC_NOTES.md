@@ -110,12 +110,31 @@ Streaming 要走 hermes 內部介面（gateway / proxy）來做。
 如果真的想動：B 是最務實的解（保留 MiniMax-M3 + 走 hermes 抽象 + streaming），
 但「hermes 介面」會從 subprocess 變成直接打 anthropic API（要評估 hermes 抽象是否仍有意義）。
 
+### v0.3.1 決策：選 B（2026-06-04）
+
+實作完成（commits）：
+- `99de74c` feat(bridge): 加 MiniMaxStreamingClient
+- `d96351b` feat(bridge): /ws 接 MiniMax-M3 SSE streaming
+
+新增 env flag：
+- `SIRO_STREAMING=true` → /ws 走 SSE streaming 推 delta 訊息給 Unity
+- 預設 false、既有 188+2 測試不動
+
+基礎建設 vs UX 差異：
+- v0.3.1 完成了「delta 訊息在 wire 上了」（Unity 收得到 `{"type":"delta","text":"你"}`）
+- 但 Unity 端目前不 render delta（v1+ 才接 incremental render）
+- 等 Unity 接上才看得到實際 UX 改善
+
 ### 待你決策
 
-1. **A / B / C / D 哪個？**（v0.3 不動 = C）
-2. 如果 B：要先確認「hermes 抽象」是否仍是必要（現在的 LLM 呼叫只有 1 個 provider、
-   hermes 抽象主要價值是「換 provider 容易」，如果只用 MiniMax-M3 不換，
-   那 hermes 這層就只是「多繞一層 subprocess」）
+1. **Unity 端什麼時候接 incremental render？**
+   - v1+ SendTask + OnClick 一起做（推薦、減少 protocol 變動次數）
+   - 提前在 v0.4 做（如果想趕快看 streaming UX 效果）
+2. **選 B 之後的 hermes 抽象評估**：
+   - 現在的 LLM 呼叫有 2 條路（hermes subprocess sync + 直接 anthropic SSE streaming）
+   - 之後如果再加 LLM provider，會在這 2 條路各加一個 client
+   - 評估：是否要把這 2 條路抽象成統一介面（`LLMClient` protocol）？
+   - 決定：目前不抽象、保持直白（2 個 client、各自獨立）；真有第 3 個 provider 再重構
 
 ### v0.2 行動
 - 寫這份文件 ✅
