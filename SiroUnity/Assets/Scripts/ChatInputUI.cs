@@ -35,6 +35,11 @@ namespace Siro
 
         private HermesBridgeClient _bridge;
 
+        // v0.3.1 SSE streaming：累積 delta 用的 buffer
+        // 每次「送出 chat」清空、第一個 delta 開始累積、最終 response 抵達時由 SetResponse 蓋掉
+        // 不暴露給 inspector（純內部狀態）
+        private System.Text.StringBuilder _streamingBuffer;
+
         private void Start()
         {
             // 找 bridge：自己身上、或同 parent
@@ -51,6 +56,7 @@ namespace Siro
             // 訂閱事件
             _bridge.OnBridgeResponse += HandleResponse;
             _bridge.OnBridgeError += HandleError;
+            _bridge.OnBridgeDelta += HandleDelta;            // v0.3.1 SSE streaming
             _bridge.OnBridgeConnected += HandleConnected;
             _bridge.OnBridgeDisconnected += HandleDisconnected;
             _bridge.OnReconnectAttempt += HandleReconnectAttempt;
@@ -71,6 +77,7 @@ namespace Siro
             {
                 _bridge.OnBridgeResponse -= HandleResponse;
                 _bridge.OnBridgeError -= HandleError;
+                _bridge.OnBridgeDelta -= HandleDelta;
                 _bridge.OnBridgeConnected -= HandleConnected;
                 _bridge.OnBridgeDisconnected -= HandleDisconnected;
                 _bridge.OnReconnectAttempt -= HandleReconnectAttempt;
@@ -133,6 +140,8 @@ namespace Siro
             }
 
             SetResponse(Localization.Get("ui.send.thinking"));
+            // v0.3.1 SSE streaming：清空累積 buffer，等 delta 開始 append
+            _streamingBuffer = new System.Text.StringBuilder();
             _ = _bridge.SendChatAsync(text);
 
             if (clearAfterSend)
@@ -146,9 +155,29 @@ namespace Siro
         private void HandleResponse(BridgeResponse response)
         {
             if (response == null) return;
+            // v0.3.1 SSE streaming：response 是 delta 累積完的最終結果
+            // 蓋掉「thinking...」或中途累積的 streaming buffer，
+            // 加上情緒標籤（delta 階段還不知道情緒 — 等 LLM 完整跑完才 parse）
             var text = string.IsNullOrEmpty(response.text) ? "（無回應）" : response.text;
             var mood = string.IsNullOrEmpty(response.emotion) ? "" : $" [{response.emotion}]";
             SetResponse($"{text}{mood}");
+            // 清掉 buffer，給下一輪送出的 chat 用
+            _streamingBuffer = null;
+        }
+
+        /// <summary>
+        /// v0.3.1 SSE streaming delta handler
+        /// bridge 端 SIRO_STREAMING=true 時每個 LLM chunk 觸發一次
+        /// 累積到 _streamingBuffer、每次都刷新 UI 文字
+        /// 沒開 streaming 時不會觸發（行為跟 v0.2 一樣）
+        /// </summary>
+        private void HandleDelta(BridgeDelta delta)
+        {
+            if (delta == null || string.IsNullOrEmpty(delta.text)) return;
+            if (_streamingBuffer == null) _streamingBuffer = new System.Text.StringBuilder();
+            _streamingBuffer.Append(delta.text);
+            // 邊累積邊 render（不附加 emotion tag — 還沒跑完）
+            SetResponse(_streamingBuffer.ToString());
         }
 
         private void HandleError(BridgeError error)

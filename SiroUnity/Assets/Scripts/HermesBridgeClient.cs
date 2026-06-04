@@ -10,6 +10,7 @@
 //   { "type": "response", "text": "...", "emotion": "happy", "intensity": 0.8,
 //     "live2d": { "expression_id": "F02", "motion_group": "Idle", ... },
 //     "session_id": "..." }
+//   { "type": "delta", "text": "你" }        ← v0.3.1 SSE streaming（每個 chunk 一個）
 //   { "type": "error", "detail": "..." }
 //   { "type": "pong" }
 //
@@ -19,6 +20,10 @@
 //   - 訂閱 OnBridgeResponse event
 //
 // v0.2: 加上自動重連（指數 backoff）
+// v0.3.1: 加上 SSE streaming delta 訊息處理（Unity 端 incremental render）
+//   - bridge 端 SIRO_STREAMING=true 時推 {"type":"delta","text":"..."} 增量
+//   - 收到 N 個 delta 後推 {"type":"response",...} 最終（行為跟 v0.2 相同）
+//   - 沒開 streaming 時只收 response、不收 delta（向下相容）
 //
 
 using System;
@@ -59,6 +64,18 @@ namespace Siro
         public string detail;
     }
 
+    /// <summary>
+    /// v0.3.1 SSE streaming delta 訊息
+    /// bridge 端 SIRO_STREAMING=true 時每收到一個 LLM chunk 就推一個
+    /// Unity 端用 OnBridgeDelta 累積文字，達到「邊生成邊 render」效果
+    /// </summary>
+    [Serializable]
+    public class BridgeDelta
+    {
+        public string type;   // 永遠 "delta"
+        public string text;   // 單一 chunk（例如 "你"、"好"、"，"）
+    }
+
     public class HermesBridgeClient : MonoBehaviour
     {
         [Header("Server")]
@@ -96,6 +113,7 @@ namespace Siro
         // 事件 - 訂閱者從這裡收訊息
         public event Action<BridgeResponse> OnBridgeResponse;
         public event Action<BridgeError> OnBridgeError;
+        public event Action<BridgeDelta> OnBridgeDelta;   // v0.3.1 SSE streaming（每個 chunk 觸發）
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
         public event Action<int> OnReconnectAttempt;  // 參數：第 N 次嘗試
@@ -372,6 +390,13 @@ namespace Siro
                     case "response":
                         var resp = j.ToObject<BridgeResponse>();
                         OnBridgeResponse?.Invoke(resp);
+                        break;
+
+                    case "delta":
+                        // v0.3.1 SSE streaming — bridge SIRO_STREAMING=true 時推的 chunk
+                        // 不論有沒有訂閱者都不丟（避免默默浪費 LLM 流量）
+                        var d = j.ToObject<BridgeDelta>();
+                        OnBridgeDelta?.Invoke(d);
                         break;
 
                     case "error":
