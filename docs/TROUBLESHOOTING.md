@@ -218,6 +218,17 @@ python -m bridge.main
 - Python 模組沒 load 或 commit 沒完成
 - 砍掉重啟、檢查 `git status` 是不是有未 commit 的改動
 
+### □ 9.4 截圖 F12 熱鍵沒反應
+- 99% 是新 Input System 沒支援 — `Input.GetKeyDown(KeyCode.F12)` 在 `Active Input Handling = Input System Package (New)` 時**靜默無作用**
+- 修法：看 `ScreenshotCapture.cs` 用 `#if ENABLE_INPUT_SYSTEM` / `#if ENABLE_LEGACY_INPUT_MANAGER` 分流（commit e403e7e）
+- **最快驗證**：Inspector 加 UI Button → onClick → 選 `ScreenshotCapture.CaptureNow` → 不依賴鍵盤
+
+### □ 9.5 找不到截圖檔
+- 看 Unity Console 有沒有 `[ScreenshotCapture] 截圖完成: <完整路徑>`
+- 沒印 = F12/CaptureNow 沒觸發、不是存檔問題
+- Windows 預設路徑：`%USERPROFILE%\AppData\LocalLow\<Company>\<Project>\screenshots\`
+- 開 File Explorer 貼 `%USERPROFILE%\AppData\LocalLow` 進去找
+
 ---
 
 ## 10. 報告新坑
