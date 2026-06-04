@@ -11,6 +11,9 @@
 //     "live2d": { "expression_id": "F02", "motion_group": "Idle", ... },
 //     "session_id": "..." }
 //   { "type": "delta", "text": "你" }        ← v0.3.1 SSE streaming（每個 chunk 一個）
+//   { "type": "task_ack", "task_id": "...", "status": "accepted" }  ← v1.2 SendTask
+//   { "type": "task_result", "task_id": "...", "result": {...} }
+//   { "type": "task_failed", "task_id": "...", "error": "..." }
 //   { "type": "error", "detail": "..." }
 //   { "type": "pong" }
 //
@@ -24,9 +27,14 @@
 //   - bridge 端 SIRO_STREAMING=true 時推 {"type":"delta","text":"..."} 增量
 //   - 收到 N 個 delta 後推 {"type":"response",...} 最終（行為跟 v0.2 相同）
 //   - 沒開 streaming 時只收 response、不收 delta（向下相容）
+// v1.2:  SendTask — Unity 主動推 task 進 AgentOS
+//   - SendTaskAsync(name, args) fire-and-await → 回 JObject result 或 throw
+//   - OnTaskResult / OnTaskFailed event 給 fire-and-forget 訂閱者
+//   - 規格見 docs/AGENT_OS.md v1.2 段
 //
 
 using System;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -76,6 +84,44 @@ namespace Siro
         public string text;   // 單一 chunk（例如 "你"、"好"、"，"）
     }
 
+    /// <summary>
+    /// v1.2 SendTask result
+    /// bridge 端 task 成功完成時推 {"type":"task_result","task_id":"...","result":{...}}
+    /// Unity 端 SendTaskAsync 內部 await 這個、訂閱 OnTaskResult 自己收
+    /// </summary>
+    [Serializable]
+    public class BridgeTaskResult
+    {
+        public string type;     // 永遠 "task_result"
+        public string task_id;  // 對應 SendTaskAsync 送出的 task_id
+        public JObject result;  // task 結果（handler 回傳的 dict）
+    }
+
+    /// <summary>
+    /// v1.2 SendTask failure
+    /// bridge 端 task 失敗時推 {"type":"task_failed","task_id":"...","error":"..."}
+    /// SendTaskAsync 內部 throw exception、訂閱 OnTaskFailed 自己收
+    /// </summary>
+    [Serializable]
+    public class BridgeTaskFailed
+    {
+        public string type;     // 永遠 "task_failed"
+        public string task_id;
+        public string error;    // 錯誤訊息（例如 "mood.set: invalid emotion 'foo'"）
+    }
+
+    /// <summary>
+    /// v1.2 SendTask 失敗時拋（bridge 端回 task_failed 觸發）
+    /// </summary>
+    public class SendTaskException : Exception
+    {
+        public string TaskId { get; }
+        public SendTaskException(string taskId, string error) : base(error)
+        {
+            TaskId = taskId;
+        }
+    }
+
     public class HermesBridgeClient : MonoBehaviour
     {
         [Header("Server")]
@@ -114,6 +160,8 @@ namespace Siro
         public event Action<BridgeResponse> OnBridgeResponse;
         public event Action<BridgeError> OnBridgeError;
         public event Action<BridgeDelta> OnBridgeDelta;   // v0.3.1 SSE streaming（每個 chunk 觸發）
+        public event Action<BridgeTaskResult> OnTaskResult;  // v1.2 SendTask 成功
+        public event Action<BridgeTaskFailed> OnTaskFailed;  // v1.2 SendTask 失敗
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
         public event Action<int> OnReconnectAttempt;  // 參數：第 N 次嘗試
@@ -126,6 +174,13 @@ namespace Siro
         private bool _shouldRun = false;
         private int _reconnectAttempts = 0;
         private Coroutine _reconnectCoroutine;
+
+        // v1.2 SendTask：追蹤 pending task 的 TaskCompletionSource
+        // SendTaskAsync 註冊一個 TCS、HandleMessage 收到 task_result / task_failed 時 SetResult / SetException
+        // 連線斷時 CancelAll，呼叫端會收到 OperationCanceledException
+        // 用 lock 保護多執行緒 access（WS receive loop + SendTaskAsync caller）
+        private readonly Dictionary<string, TaskCompletionSource<JObject>> _pendingTasks = new Dictionary<string, TaskCompletionSource<JObject>>();
+        private readonly object _pendingTasksLock = new object();
 
         public bool IsConnected => _isConnected;
         public int ReconnectAttempts => _reconnectAttempts;
@@ -235,6 +290,113 @@ namespace Siro
         {
             var payload = new JObject { ["type"] = "ping" };
             await SendJsonAsync(payload);
+        }
+
+        /// <summary>
+        /// v1.2 SendTask — Unity 主動推 task 進 bridge AgentOS、等結果回來
+        /// 規格見 docs/AGENT_OS.md v1.2 段
+        ///
+        /// Fire-and-await：生出 task_id、送出 message、等 task_result 或 task_failed 回來
+        /// 訂 fire-and-forget 模式：不要 await、用訂閱 OnTaskResult / OnTaskFailed 自己收
+        ///
+        /// Args:
+        ///   name: task name（"mood.set" / "motion.play" / "persona.switch" / "chat.say" / "chat.summon"）
+        ///   args: task 參數 dict（依 task 而異）
+        ///   timeoutSec: 等結果多久、default 5s（task 通常 < 1s，5s 給 LLM task 預留 buffer）
+        ///
+        /// Returns:
+        ///   task handler 回傳的 result（JObject）
+        ///
+        /// Throws:
+        ///   TimeoutException: 超過 timeoutSec 沒收到 result
+        ///   InvalidOperationException: 尚未連線到 bridge
+        ///   SendTaskException: bridge 端回 task_failed（error 訊息在 Message 裡）
+        ///   OperationCanceledException: 連線中斷、pending task 被 cancel
+        /// </summary>
+        public async Task<JObject> SendTaskAsync(string name, JObject args, float timeoutSec = 5.0f)
+        {
+            if (!_isConnected || _ws == null)
+            {
+                throw new InvalidOperationException("[HermesBridge] 尚未連線，無法 SendTask");
+            }
+            if (string.IsNullOrEmpty(name))
+            {
+                throw new ArgumentException("[HermesBridge] SendTask name 不能空白", nameof(name));
+            }
+
+            // task_id：UUID4 hex[:8]（跟 Python 端 Task.id 同步格式 — UUID4 32 字 hex 取前 8）
+            string taskId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var tcs = new TaskCompletionSource<JObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            lock (_pendingTasksLock)
+            {
+                _pendingTasks[taskId] = tcs;
+            }
+
+            try
+            {
+                // 送出 {"type":"task", "task_id":"...", "name":"...", "args":{...}, "user_id":"..."}
+                var payload = new JObject
+                {
+                    ["type"] = "task",
+                    ["task_id"] = taskId,
+                    ["name"] = name,
+                    ["args"] = args ?? new JObject(),
+                    ["user_id"] = userId,
+                };
+                await SendJsonAsync(payload);
+                if (verboseLogging) Debug.Log($"[HermesBridge] SendTask: {name} (task_id={taskId})");
+
+                // 等 task_result / task_failed、或 timeout
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(timeoutSec));
+                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    // 超時 — 從 pending 移除、拋 TimeoutException
+                    lock (_pendingTasksLock)
+                    {
+                        _pendingTasks.Remove(taskId);
+                    }
+                    throw new TimeoutException(
+                        $"[HermesBridge] SendTask {name!r} (task_id={taskId}) 超過 {timeoutSec}s 沒回 result"
+                    );
+                }
+
+                return await tcs.Task;  // task_result 時是 JObject；task_failed 會 throw SendTaskException
+            }
+            finally
+            {
+                // 不論成功失敗、確保 pending 移除（避免重複 SetResult）
+                lock (_pendingTasksLock)
+                {
+                    _pendingTasks.Remove(taskId);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 連線中斷時 cancel 所有 pending SendTask
+        /// 呼叫端會收到 OperationCanceledException、可以選擇 retry
+        /// </summary>
+        private void CancelAllPendingTasks(string reason)
+        {
+            List<TaskCompletionSource<JObject>> toCancel;
+            lock (_pendingTasksLock)
+            {
+                toCancel = new List<TaskCompletionSource<JObject>>(_pendingTasks.Values);
+                _pendingTasks.Clear();
+            }
+            foreach (var tcs in toCancel)
+            {
+                tcs.TrySetException(new OperationCanceledException(
+                    $"[HermesBridge] SendTask cancelled: {reason}"
+                ));
+            }
+            if (toCancel.Count > 0 && verboseLogging)
+            {
+                Debug.LogWarning($"[HermesBridge] 已 cancel {toCancel.Count} 個 pending SendTask（{reason}）");
+            }
         }
 
         // ==================== 重連邏輯 ====================
@@ -372,9 +534,17 @@ namespace Siro
             if (_isConnected)
             {
                 _isConnected = false;
+                // v1.2 SendTask：cancel 所有 pending、caller 收到 OperationCanceledException
+                CancelAllPendingTasks("連線中斷");
                 OnBridgeDisconnected?.Invoke();
                 if (verboseLogging) Debug.Log("[HermesBridge] 連線中斷");
                 if (autoReconnect && _shouldRun) StartReconnect();
+            }
+            else
+            {
+                // receive loop 結束但 _isConnected 早就是 false（被 DisconnectAsync 設的）
+                // 仍然要 cancel pending、避免 caller 永遠等
+                CancelAllPendingTasks("receive loop 結束");
             }
         }
 
@@ -397,6 +567,52 @@ namespace Siro
                         // 不論有沒有訂閱者都不丟（避免默默浪費 LLM 流量）
                         var d = j.ToObject<BridgeDelta>();
                         OnBridgeDelta?.Invoke(d);
+                        break;
+
+                    case "task_ack":
+                        // v1.2 SendTask：bridge 已收下 task、進 registry
+                        // SendTaskAsync 本身不等 ack（直接等 result），所以這裡只給訂閱者 log
+                        if (verboseLogging) Debug.Log($"[HermesBridge] task_ack: {j["task_id"]}");
+                        break;
+
+                    case "task_result":
+                        // v1.2 SendTask 成功 — 從 pending 移除、SetResult
+                        var tRes = j.ToObject<BridgeTaskResult>();
+                        lock (_pendingTasksLock)
+                        {
+                            if (_pendingTasks.TryGetValue(tRes.task_id, out var tcs))
+                            {
+                                _pendingTasks.Remove(tRes.task_id);
+                                tcs.TrySetResult(tRes.result);
+                            }
+                            else
+                            {
+                                if (verboseLogging) Debug.LogWarning(
+                                    $"[HermesBridge] 收到 task_result 但找不到 pending task: {tRes.task_id}"
+                                );
+                            }
+                        }
+                        OnTaskResult?.Invoke(tRes);
+                        break;
+
+                    case "task_failed":
+                        // v1.2 SendTask 失敗 — SetException 讓 SendTaskAsync caller 收到 SendTaskException
+                        var tFail = j.ToObject<BridgeTaskFailed>();
+                        lock (_pendingTasksLock)
+                        {
+                            if (_pendingTasks.TryGetValue(tFail.task_id, out var tcs))
+                            {
+                                _pendingTasks.Remove(tFail.task_id);
+                                tcs.TrySetException(new SendTaskException(tFail.task_id, tFail.error));
+                            }
+                            else
+                            {
+                                if (verboseLogging) Debug.LogWarning(
+                                    $"[HermesBridge] 收到 task_failed 但找不到 pending task: {tFail.task_id}"
+                                );
+                            }
+                        }
+                        OnTaskFailed?.Invoke(tFail);
                         break;
 
                     case "error":
