@@ -459,7 +459,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - **bridge 升級成後台作業系統（AgentOS）** — v0.2 骨架 / v0.3 接到 /chat /ws
 - **SSE streaming 基礎建設** — v0.3.1 選項 B（MiniMaxStreamingClient）
 
-**v0.x 進度子表**（v0.2 → v0.3.1 都屬 Phase 2）：
+**v0.x 進度子表**（v0.2 → v0.4+ 都屬 Phase 2，**v1.0+ 見「v1+ Roadmap」段**）：
 
 
 | 子版本     | 狀態 | 重點                                                                      | 對應 commit                             |
@@ -965,6 +965,25 @@ escape_password = "..."
 
 ---
 
+## v1+ Roadmap（Phase 2 內 sub-versions）
+
+Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5**（單機單 Mao 階段的細部擴充）。
+
+**Single source of truth**：[docs/AGENT_OS.md](docs/AGENT_OS.md) 的「v1+ Roadmap」段（含 v1.2 SendTask + OnClick 完整規格 — WS message 格式、C# API、task 種類、驗收條件、實作順序）。
+
+各 sub-version 簡述：
+
+| Sub-version | 場景 | 預估時程 |
+|---|---|---|
+| **v1.0** | Telegram 整合（`bridge/telegram_bot.py`） | 3-5 天 |
+| **v1.1** | 排程/cron（`bridge/scheduler.py`） | 2-3 天 |
+| **v1.2** | Unity 點 Live2D → task（SendTask + OnClick） | 3 天（**規格見 AGENT_OS.md**） |
+| **v1.5** | LLM tool calling（Mao 主動召喚任務） | 1-2 週 |
+
+v0.x 進度（v0.2/v0.3/v0.3.1/v0.4/v0.4+）見「§5.5 v0.x 進度子表」。
+
+---
+
 ## 9. 時間軸
 
 ```
@@ -1057,6 +1076,7 @@ AI 拿到任何一個 Phase 的 spec，可以獨立完成其中的子任務。
 
 | 日期       | 版本   | 變更                                                                                                                                |
 | ---------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-04 | v3.2   | v1+ Roadmap 段：加 SendTask + OnClick 完整規格（WS message 格式、C# API、task 種類、驗收條件、實作順序）放 AGENT_OS.md、PLAN.md 引用 |
 | 2026-06-04 | v3.1   | v0.4 翻預設：`SIRO_USE_AGENT_OS` 預設從 false 改 true（逃生 `=false`）、v0.x 子表 v0.4 ✅、視覺設定檔 v0.3 ✅、test count 190 → 198 |
 | 2026-06-04 | v3.0   | 對齊 v0.3 實況：Phase 0 改 ✅ 完成、Phase 2 改 🟡 進行中（v0.3.1）、Phase 2 加 v0.x 進度子表、test count 78 → 190、加 cross-ref 段 |
 | 2026-06-04 | v2.0.x | v0.3 期間的細部修訂（PLAN_REVIEW_v0.3、PLAN_REVISION_v2.1）— 見`docs/PLAN_REVIEW_v0.3.md`                                          |

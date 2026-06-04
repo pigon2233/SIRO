@@ -191,9 +191,106 @@ state.agent_os.event_bus.subscribe("task.completed", on_completed)
 |---|---|---|
 | **v1.0** | Telegram 整合 | `bridge/telegram_bot.py`（polling 模式），handler 把訊息 enqueue `telegram_msg` task |
 | **v1.1** | 排程 | `bridge/scheduler.py`，asyncio loop + cron parser |
-| **v1.2** | Unity 點 Live2D → task | Unity 端 `OnClick()`、`HermesBridgeClient.SendTask()`、WS 支援 `task` message type |
+| **v1.2** | Unity 點 Live2D → task | Unity 端 `OnClick()`、`HermesBridgeClient.SendTask()`、WS 支援 `task` message type（**規格見下「v1.2 SendTask + OnClick 規格」**） |
 | **v1.5** | LLM tool calling | bridge 支援 function calling schema，Mao 可以召喚任務（查股票、設提醒） |
 | **v2.0** | 任務持久化 | SQLite、bridge 重啟可恢復；multi-process / K8s 部署就緒 |
+
+---
+
+## v1.2 SendTask + OnClick 規格（v1.2 規劃文件 — 2026-06-04 寫）
+
+> 目的：Unity 不只能「等回應」（`/chat` response 訊息），還能「**主動推 task 進 AgentOS**」做後續操作。
+> 場景：點 Mao 頭 → 觸發 `mood.set happy` → bridge 設 Mao 情緒、下次 chat 用新 mood。
+> 跟 v0.4+ commit 0dd9da7（incremental render）方向相反 — incremental render 是 bridge → Unity 推文字；SendTask 是 Unity → bridge 推 task。
+
+### 1. WS message types（bridge ↔ Unity）
+
+**Unity → bridge 送 task**（fire-and-forget 模式，可選等 result）：
+```json
+{ "type": "task", "task_id": "abc12345", "name": "mood.set", "args": { "emotion": "happy" } }
+```
+
+**bridge → Unity 三種 reply**：
+```json
+// 1. 已收下（task 進 queue）
+{ "type": "task_ack", "task_id": "abc12345", "status": "accepted" }
+
+// 2. 完成（success）
+{ "type": "task_result", "task_id": "abc12345", "result": { "ok": true } }
+
+// 3. 失敗
+{ "type": "task_failed", "task_id": "abc12345", "error": "mood.set: invalid emotion 'foo'" }
+```
+
+**task_id 規範**：Unity 端生 UUID4 hex[:8]（跟 Python `Task.id` 同步格式），避免跟 bridge 內部 task id 撞。
+
+### 2. Unity C# API
+
+**`HermesBridgeClient`**：
+```csharp
+// fire-and-await：包好 task_id、發送、等 task_result 或 task_failed 回來
+public async Task<JObject> SendTaskAsync(string name, JObject args, float timeoutSec = 5.0f);
+
+// subscribe pattern：訂閱這兩個 event、自己做 correlation（用 task_id）
+public event Action<TaskResult> OnTaskResult;
+public event Action<TaskError> OnTaskFailed;
+```
+
+**`Live2DModelController`**（Cubism hit detection）：
+```csharp
+// Cubism SDK 點擊 Mao 任一 hit area 觸發（head/body/自訂）
+// 內部組 { hit_area: "head", event: "click" } 推 SendTask
+// persona YAML 配 clickable_areas: [{ area: "head", task: "mood.set", args: {emotion: "happy"} }]
+public event Action<string> OnMaoClicked;  // 參數：hit area name
+```
+
+### 3. 預設 task 種類（v1.2 第一波）
+
+| task name | args | 用途 | Mao 行為 |
+|---|---|---|---|
+| `mood.set` | `{emotion, intensity?}` | 設當前 mood、emotion_parser 後續 chat 用 | 立即切表情 |
+| `motion.play` | `{motion_group, motion_index}` | 播指定 motion | 立即播 |
+| `persona.switch` | `{persona_id}` | 切換 persona | 重載 Live2D model + 更新 UI |
+| `chat.say` | `{text}` | Mao 主動說話（不需 user 觸發） | TTS + 表情（v1.5+ 才有 TTS） |
+| `chat.summon` | `{}` | Mao 召回對話（「嘿、在嗎？」） | Mao 開口的視覺 + log |
+
+### 4. 連線中斷處理
+
+- Unity 送 task 後連線斷 → 記在 Unity 端 pending queue、重連後 batch 查詢
+- 或：v1.2 先接受「斷線 = 丟 task」、console warning；v2.0 持久化再開 queue
+
+### 5. 驗收條件
+
+- [ ] Unity 點 Mao 頭 → 100ms 內 task 進 bridge queue
+- [ ] task 結果 1s 內回 Unity（不含 LLM task — LLM task 可等幾秒）
+- [ ] task 失敗 → Unity console 印 error、不閃退
+- [ ] 連線中斷時 task silently lost 有 console warning（v1.2 不要求持久化）
+- [ ] 8 個單元測試：
+  - SendTaskAsync 產生合法 task_id（UUID4 hex[:8]）
+  - bridge 收到 `task` → enqueue AgentOS → 推 `task_ack`
+  - task 成功 → 推 `task_result`（correlation 對）
+  - task 失敗 → 推 `task_failed`（error message 帶到 Unity）
+  - Unity 訂閱 event 沒收 ack → 5s timeout raise exception
+  - 連線斷時 SendTaskAsync raise、pending task 標 retry-pending
+  - 未知 task name → `task_failed` error="unknown task"
+  - 同 task_id 送兩次 → 第二個被 reject（避免 race）
+
+### 6. 實作順序（建議）
+
+1. bridge 端 WS message handler（接 `task`、推 ack/result/failed）— 0.5 天
+2. AgentOS 內建 `task` registry（內建 mood.set / motion.play / persona.switch / chat.say / chat.summon）— 0.5 天
+3. Unity `HermesBridgeClient.SendTaskAsync` + event — 0.5 天
+4. Unity `Live2DModelController` Cubism hit area 偵測 + persona YAML `clickable_areas` 對應 — 0.5 天
+5. 8 個單元測試 — 0.5 天
+6. Unity Play 模式手動驗證 + persona YAML example — 0.5 天
+
+**總計 ~3 天**（半天細項不計）
+
+### 7. 跟現有 WS protocol 的關係
+
+- 純 additive（加新 type、不改既有 message）
+- 跟 v0.4+ commit 0dd9da7（incremental render）**互不影響** — 方向相反
+- 跟 v0.3 `task` 在 AgentOS 內部已存在（`create_llm_reply_task`）— WS `task` 是新介面、內部還是 `state.agent_os.enqueue(InternalTask)`
 
 ## 跟 Mao 對話的內部流程（v0.2 vs v0.3）
 
