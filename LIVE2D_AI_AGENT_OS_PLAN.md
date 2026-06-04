@@ -35,6 +35,8 @@
 8. [風險登記](#8-風險登記)
 9. [時間軸](#9-時間軸)
 10. [AI 協作開發指南](#10-ai-協作開發指南)
+11. [使用者驗證](#11-使用者驗證)
+12. [變更紀錄](#12-變更紀錄)
 
 ---
 
@@ -86,6 +88,42 @@
 - 螢幕：1080p 觸控（選配）
 - 音訊：內建 + 麥克風陣列（選配）
 - 視訊：內建 + 廣角鏡頭（選配）
+
+### 1.4 範圍邊界
+
+> 為什麼寫這段：防止 scope creep、未來 phase 開工前先看這段對齊「做 / 不做」。詳細來源見 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #14。
+
+**v1 試用期（2026 12 月 v1 發布前）不做**：
+
+- 真正的作業系統（v2.0+ 才做）
+- Ubuntu 雙系統安裝 / 取代傳統桌面 / 開機直接是角色（v2.0+）
+- Rust siro-runtime（v2.0+）
+- 完整 OTA 更新 + A/B partition（v2.0+ 視規模決定）
+- Packer image 自動化（v2.0+）
+- 多裝置同步（親友版 v2.0+）
+- 雲端同步 / 多用戶切換 / 帳號系統
+- 付款 / 訂閱 / App Store
+- 多語 UI（v1 繁中、英文 OK 即可）
+
+**v1 試用期只做**：
+
+- 1 個角色（Mao，之後可加多 persona）
+- 繁中對話
+- 雲端 LLM（MiniMax-M3）+ 本地 Ollama fallback
+- 表情切換 / 待機動作
+- WebSocket 通訊
+- 文字輸入（語音選配 v1.5+）
+- Phase 1.5 persona 抽象
+- Phase 4 Linux 化（雙系統 / 單系統二選一）
+- Phase 6 部署到 2-10 台
+
+**為什麼重要**：
+
+- 防止 scope creep — 親友說「能不能加 X」時先看這表
+- 讓「不做」變成**有意識的決定**（不是遺漏）
+- 給未來的自己「當初為什麼不做」的理由（v3.0 修訂時可挑戰）
+
+**交叉參考**：[docs/ARCHITECTURE.md §8 不在 v0/v1 範圍](docs/ARCHITECTURE.md#8-不在-v0v1-範圍)（更細的硬體 / 商業項目排除清單）
 
 ---
 
@@ -484,10 +522,11 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.4 翻預設、逃生 `=false`）
 - [X]  Unity 端 incremental render 接 /ws delta 訊息（**v0.4+ 提前做**，原本規劃 v1+ 一起做 — 詳見 STRATEGIC_NOTES Q2）
 - [X]  **v1.2** SendTask + OnClick（Unity 推 task 進 AgentOS、`Live2DModelController.OnMaoClicked` + `PersonaClickHandler` 串接、5 個 built-in：mood.set / motion.play / persona.switch / chat.say / chat.summon）
-- [ ]  `Live2DModelController` 表情過渡動畫（⏸ 暫停）
-- [ ]  點擊 Mao motion（⏸ 暫停 — v1.2 MVP 不分 hit area，v1.5+ 用 CubismHitDrawable）
-- [ ]  Loading 狀態視覺（⏸ 暫停）
-- [ ]  截圖功能（⏸ 暫停）
+- [X]  `Live2DModelController` 表情過渡動畫 — `SetExpression` + `blendLockDuration` inspector 可調（commit 6908730）、K5 KPI < 200ms 達標
+- [X]  點擊 Mao motion — v1.2 `motion.play` task + `Live2DModelController.PlayMotion` 已存在、AGENT_OS.md 給 inspector 範例（commit 198413c）；v1.2 MVP 不分 hit area、v1.5+ 用 CubismHitDrawable
+- [X]  Loading 狀態視覺 — `ChatInputUI` disable input + 動畫「思考中.」dots（commit 24ab90a）
+- [X]  截圖功能 — `ScreenshotCapture` MonoBehaviour、RenderTexture 存 PNG、F12 熱鍵（commit 4e3fe78）
+- [X]  響應時間優化 — Ollama fallback timeout 15s→3s（commit 9e205dc）
 
 **驗收條件**（對應 KPI）：
 
@@ -499,13 +538,13 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）（⏸ 暫停）
 - [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
-**預估時間**：剩餘 ~1 週（4 個視覺項目）
+**預估時間**：Phase 2 剩 v1.5+ LLM tool calling、v2.0 持久化
 **依賴**：Phase 1.5 ✅
 **風險**：
 
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
-- 🟢 Unity incremental render（v0.4+）+ SendTask（v1.2）都完成；剩 4 個視覺項目 + 1 個 SendTask 細化（v1.5+ LLM tool calling、v2.0 持久化）
+- 🟢 Phase 2 4 個視覺項目 + 響應時間都完成；剩 v1.5+ LLM tool calling、v2.0 持久化
 
 ---
 
@@ -964,22 +1003,77 @@ escape_password = "..."
 | R9  | 多人多帳號混亂                 | 低   | 中   | v0 單人、之後加 multi-user 設計（保留 user_id 欄位）                |
 | R10 | 隱私資料外洩                   | 低   | 高   | 本地處理優先、上傳需明確同意、log 過濾個資                          |
 
+### 8.5 LLM 廠商風險管理
+
+> 對應 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #5 + [docs/STRATEGIC_NOTES.md Q2](docs/STRATEGIC_NOTES.md#q2-streaming-回應) 結論。
+
+**問題**：
+
+v0.2 用 Hermes CLI 當 LLM 中介，但 hermes 沒 streaming flag — 卡了 v0.3。18-20s 回應時間太長。
+v0.4 採 STRATEGIC_NOTES Q2 結論（**不繞過 hermes** 但 proxy 限制 → 寫 `MiniMaxStreamingClient` 直打 Anthropic SSE）。
+
+**目前架構**（2 條 LLM 呼叫路徑，**不抽 protocol 抽象**）：
+
+| Client | 用途 | 啟用方式 |
+|---|---|---|
+| `bridge/hermes_client.py` | subprocess 走 hermes CLI（sync） | 預設路徑 |
+| `bridge/minimax_streaming_client.py` | 直打 Anthropic SSE（streaming） | opt-in `SIRO_STREAMING=true` |
+| `bridge/ollama_client.py` | 本地 Ollama fallback | hermes timeout 時自動切 |
+
+**v1+ 加新 provider 時的策略**（per STRATEGIC_NOTES Q2）：
+
+- ❌ **不抽** `LLMClient` protocol 抽象層（避免過度工程、保持直白）
+- ✅ 每加一個 provider 寫一個 client 檔
+- ⏸ 真有**第 3 個 provider** 時再考慮抽象（SQLite 持久化、MCP 整合、Claude API 直連都有可能）
+
+**抽象層的禁止事項**（即使沒 protocol 也要守）：
+
+- ❌ 業務邏輯直接 `import hermes_sdk` / `import anthropic`
+- ❌ 業務邏輯依賴特定 provider 功能（除非 opt-in flag）
+- ❌ 業務邏輯處理 provider 認證（統一在 client 內部讀 `.env`）
+
+**歷史教訓（v0.4 觀察期）**：
+
+- ✅ 2 個 client 並行跑 2 個月，沒問題
+- ⏸ 第 3 個 provider 進來時重構（觸發條件明確定義）
+
+**對應文件**：
+
+- [STRATEGIC_NOTES.md Q2](docs/STRATEGIC_NOTES.md#q2-streaming-回應) — 完整決策（為什麼不繞過 hermes）
+- [DECISIONS.md #001](docs/DECISIONS.md#決策-001--為什麼用-hermes-agent-當核心大腦) — 為什麼用 hermes
+- [DECISIONS.md #001 修正](docs/DECISIONS.md) §修正 — v0.2 觀察（hermes 缺 streaming）
+
 ---
 
 ## v1+ Roadmap（Phase 2 內 sub-versions）
 
-Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5**（單機單 Mao 階段的細部擴充）。
+Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**（單機單 Mao 階段的細部擴充 + 持久化層級）。
 
 **Single source of truth**：[docs/AGENT_OS.md](docs/AGENT_OS.md) 的「v1+ Roadmap」段（含 v1.2 SendTask + OnClick 完整規格 — WS message 格式、C# API、task 種類、驗收條件、實作順序）。
 
 各 sub-version 簡述：
 
-| Sub-version | 場景 | 預估時程 |
-|---|---|---|
-| **v1.0** | Telegram 整合（`bridge/telegram_bot.py`） | 3-5 天 |
-| **v1.1** | 排程/cron（`bridge/scheduler.py`） | 2-3 天 |
-| **v1.2** | Unity 點 Live2D → task（SendTask + OnClick） | 3 天（**規格見 AGENT_OS.md**） |
-| **v1.5** | LLM tool calling（Mao 主動召喚任務） | 1-2 週 |
+| Sub-version | 場景 | 預估時程 | 對應 KPI / GAPS |
+|---|---|---|---|
+| **v1.0** | Telegram 整合（`bridge/telegram_bot.py`） | 3-5 天 | GAPS #5（災難恢復的遠端介入） |
+| **v1.1** | 排程/cron（`bridge/scheduler.py`） | 2-3 天 | — |
+| **v1.2** | Unity 點 Live2D → task（SendTask + OnClick） | 3 天（**規格見 AGENT_OS.md**） | — |
+| **v1.5** | LLM tool calling（Mao 主動召喚任務） | 1-2 週 | GAPS #2（多模態的 tool use） |
+| **v2.0** | **任務持久化 + bridge 重啟可恢復 + multi-process 部署就緒** | 2-3 週 | **K9（5歲到80歲會用）正式開始驗證**、GAPS #4（離線）、#5（災難恢復）|
+
+**v2.0 重點**（補上 [AGENT_OS.md v1+ Roadmap](docs/AGENT_OS.md) 漏段）：
+
+- **任務持久化**：bridge 改用 SQLite 取代 v0.x 的 in-memory `state.sessions`（對話歷史 + task queue + worker state 全部落盤）
+- **bridge 重啟可恢復**：bridge 重啟時 in-flight task 從 SQLite 撈回來繼續跑、不丟失
+- **SendTask 升級**：v1.2 的 `SendTaskAsync` 從「斷線 = 丟 task」升級成「斷線 = pending → 重連後 replay」（v1.2 規格 §4 已預留）
+- **multi-process 部署就緒**：v2.0 後可水平擴展 worker pool（v1 之前單 process 撐 1 個 Mao 就夠）
+- **KPI K9 啟動**：v2.0 開始找非工程師試用、累積 user testing 資料（見 [§11 使用者驗證](#11-使用者驗證)）
+
+**為什麼 v2.0 在這裡而不是 v2.0+ 願景**：
+
+- AGENT_OS.md v1+ Roadmap 已經把 v2.0 列為正式 sub-version（不是 v2 願景）
+- 排進時間軸：**2027 1-3 月**（Phase 6 部署到 2-10 台後 → 累積 1 季觀察 → v2.0 開工）
+- v2.0+ 之後才是「AI Agent OS」願景層（取代傳統桌面、Rust 改寫等）
 
 v0.x 進度（v0.2/v0.3/v0.3.1/v0.4/v0.4+）見「§5.5 v0.x 進度子表」。
 
@@ -1072,11 +1166,82 @@ AI 拿到任何一個 Phase 的 spec，可以獨立完成其中的子任務。
 
 ---
 
-## 11. 變更紀錄
+## 11. 使用者驗證
+
+> 對應 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #12 + KPI **K9**（5歲到80歲會用 — v2 驗證，但 v0.4 就要開始累積資料）。
+
+**為什麼要這章**：
+
+開發者 = 使用者的盲點 — 一個人寫、一個人用，會以為合理的設計其他人用起來不順。
+SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是「程式碼跑得起來」。
+
+### 11.1 v0.x 階段（單人 + 自己）
+
+- 開發者 = 使用者，自己做 user testing
+- 寫 **user diary**（每天跟 Mao 講話的紀錄、什麼順、什麼卡）
+- 找 **1-2 個親友**試用（錄影回饋）
+- 記錄：用了幾次、什麼情境用、卡多久就放棄
+
+### 11.2 v1.x 階段（小眾試用）
+
+- 找 **2-5 個非工程師**試用
+- 設定時間（1 週）
+- 每天記錄：
+  - 用什麼（功能清單）
+  - 卡什麼（UX 阻礙）
+  - 放棄什麼（不要的功能）
+- **不能問「為什麼不用」**（會被合理化）
+- 改觀察：用了幾次、卡多久就放棄
+
+### 11.3 觀察指標
+
+| 指標 | 定義 | v0.x 目標 | v1.x 目標 | v2 目標 |
+|---|---|---|---|---|
+| **啟用率** | 收到後 7 天內還會用 | 100%（自己） | ≥ 50% | ≥ 70% |
+| **留存** | 第 30 天還會用 | 100% | ≥ 30% | ≥ 50% |
+| **失敗模式** | 卡多久就放棄 | < 5 分鐘 | < 10 分鐘 | < 5 分鐘 |
+| **真實需求** | 跟「以為需要」的落差 | 自己回頭比對 | 親友訪談 | 量化問卷 |
+
+### 11.4 每次 user test 問的問題
+
+1. 你想讓 Mao 做什麼？
+2. 為什麼想這樣做？
+3. 卡在哪？
+4. 放棄了嗎？為什麼？
+5. 跟其他 AI 比較（ChatGPT、Siri、⋯）？
+
+### 11.5 對應的 K9 KPI 啟動時程
+
+| 階段 | 動作 |
+|---|---|
+| **v0.x**（現在） | 開發者自己 + 1-2 親友的 user diary 累積 |
+| **v1.0**（Telegram 整合）| 找 1 位「不會用 AI 的人」試用 Telegram bot 1 週 |
+| **v1.5**（LLM tool calling）| 觀察：Mao 主動召喚任務對非工程師是「驚喜」還是「嚇到」|
+| **v2.0** | 正式啟動 K9 驗證（user testing 量化問卷 + 5 歲到 80 歲年齡分層測試）|
+
+**重要**：開發者假設永遠錯。**唯一驗證方式：看別人用。**
+
+### 11.6 v2.0 之後的願景（K9 完整驗證）
+
+- 5 歲到 80 歲分層測試（幼兒 / 學生 / 上班族 / 退休）
+- 各 5 人、共 20 人
+- 量化：成功率、任務完成率、情緒反應（log 統計）
+- 結果寫進 [docs/USER_RESEARCH.md](docs/USER_RESEARCH.md)（v2.0 才開檔）
+
+### 11.7 交叉參考
+
+- [docs/GAPS.md #9 降級路徑](docs/GAPS.md#9-降級路徑失敗展示-) — 「使用者會看到什麼」對齊 user testing 觀察
+- [docs/STRATEGIC_NOTES.md Q1](docs/STRATEGIC_NOTES.md#q1-rust-改寫-bridge) — 為什麼 K9 驗證前不急著 Rust 改寫（v0.x Python 對使用者無感）
+
+---
+
+## 12. 變更紀錄
 
 
 | 日期       | 版本   | 變更                                                                                                                                |
 | ---------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增 `docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling |
+| 2026-06-05 | v3.4   | 合併 PLAN_REVISION_v2.1 + PLAN_REVIEW_v0.3 部分修訂：(1) v1+ Roadmap 加 v2.0（任務持久化、bridge 重啟可恢復、multi-process 部署就緒，K9 KPI 正式啟動驗證）— 補 AGENT_OS.md 漏段；(2) 加 §1.4 範圍邊界（v1 不做清單 14 項 + 只做清單）；(3) 加 §8.5 LLM 廠商風險管理（2 client 並行 + 不抽 protocol 抽象的決策依據）；(4) 加 §11 使用者驗證（user diary SOP + K9 啟動時程）；(5) v1+ Roadmap 表加「對應 KPI / GAPS」欄 |
 | 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端 `SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅ |
 | 2026-06-04 | v3.2   | v1+ Roadmap 段：加 SendTask + OnClick 完整規格（WS message 格式、C# API、task 種類、驗收條件、實作順序）放 AGENT_OS.md、PLAN.md 引用 |
 | 2026-06-04 | v3.1   | v0.4 翻預設：`SIRO_USE_AGENT_OS` 預設從 false 改 true（逃生 `=false`）、v0.x 子表 v0.4 ✅、視覺設定檔 v0.3 ✅、test count 190 → 198 |
