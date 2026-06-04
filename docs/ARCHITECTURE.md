@@ -1,9 +1,19 @@
 # SIRO 系統架構
 
-> v2.0（2026-06-02） — 4 層架構：Linux + Rust + Python + Unity
+> **目前進度 v0.3**（2026-06-04）— Layer 1（Unity）+ Layer 2（Python）已實作，Layer 3（Rust）+ Layer 4（Linux）規劃中
+> **終極願景 v2.0** — 4 層架構：Linux + Rust + Python + Unity
 > 完整計畫見 [../LIVE2D_AI_AGENT_OS_PLAN.md](../LIVE2D_AI_AGENT_OS_PLAN.md)
 > 介面契約見 [API.md](API.md)
 > 設計決策見 [DECISIONS.md](DECISIONS.md)
+
+### v0.3 範圍對照
+
+| 層 | 內容 | v0.3 狀態 |
+|---|------|-----------|
+| Layer 1: Presentation (Unity) | Mao Live2D + Chat UI + Persona + i18n | ✅ 完成（Play 模式實測） |
+| Layer 2: AI Bridge (Python) | FastAPI + Hermes + EmotionParser + AgentOS（骨架 v0.2 / 接到 /chat v0.3 opt-in）| ✅ 完成 |
+| Layer 3: System Runtime (Rust) | siro-runtime daemon + supervisor | ⏳ v0.3 不做、Phase 3+ |
+| Layer 4: System (Linux) | Ubuntu + systemd + kiosk + NVIDIA | ⏳ v0.3 不做、Phase 4 |
 
 ---
 
@@ -24,9 +34,11 @@
 │  Layer 2: AI Bridge (Python)                                │
 │  ├─ FastAPI HTTP / WebSocket                                 │
 │  ├─ Hermes Agent 整合（subprocess）                            │
-│  ├─ 情緒解析、session 管理                                     │
-│  ├─ Local LLM API（Ollama，未來）                              │
-│  └─ gRPC Client → Layer 3                                   │
+│  ├─ Ollama 本地 LLM（已整合，當 fallback）                      │
+│  ├─ 情緒解析、session 管理、jieba 斷詞                          │
+│  ├─ AgentOS（v0.3 進度）：Task Queue + Event Bus + Worker Pool│
+│  │     + Task.id + wait_for_task() — /chat opt-in 走這條     │
+│  └─ gRPC Client → Layer 3（Phase 3+ 才接，現階段走 subprocess）│
 └─────────────────────────────────────────────────────────────┘
             ↕ gRPC (port 50051) / Unix socket
 ┌─────────────────────────────────────────────────────────────┐
@@ -128,13 +140,20 @@ unity/
 
 ```
 bridge/
-├── main.py                      # FastAPI 入口
+├── main.py                      # FastAPI 入口（含 /chat /ws /personas）
 ├── hermes_client.py             # Hermes CLI 封裝
+├── ollama_client.py             # Ollama 本地 LLM（fallback）
+├── agent_os.py                  # v0.3 AgentOS — Task Queue + Event Bus + Worker Pool
+│                                # + Task.id + wait_for_task() + EventBus unsubscribe
+├── tasks/                       # v0.3 任務模組
+│   ├── __init__.py
+│   └── llm_reply_task.py        # 第一個 task（封裝 /chat LLM 邏輯）
 ├── emotion_parser.py            # 情緒解析
 ├── emotion_mapping.json         # 情緒 → Live2D 映射
 ├── prompts.py                   # System prompts
 ├── models.py                    # Pydantic schemas
-├── grpc_client/                 # Layer 3 介接
+├── personas/                    # YAML persona 設定
+├── grpc_client/                 # Layer 3 介接（Phase 3+ 才用，v0.3 走 subprocess）
 │   ├── __init__.py
 │   ├── client.py                # gRPC client wrapper
 │   └── generated/               # protoc 產生的程式碼
@@ -144,19 +163,22 @@ bridge/
 
 **職責**：
 - 對 Unity 暴露 HTTP/WS API
-- 對 LLM / Hermes 暴露文字介面
-- 情緒解析、session 管理
+- 對 LLM / Hermes / Ollama 暴露文字介面
+- 情緒解析、session 管理、jieba 斷詞
+- **v0.3 新增**：AgentOS 後台作業系統 — 接管 /chat 走 task queue + event bus（opt-in via `SIRO_USE_AGENT_OS`）
 - 設定管理
 
 **對外介面**：
-- HTTP：8001 port
-- gRPC：50051 port（呼叫 Layer 3）
+- HTTP/WS：8001 port（v0.3 已有）
+- gRPC：50051 port（**Phase 3+**才接 Layer 3，v0.3 不開）
 
 **啟動**：
 ```bash
 cd bridge
 source .venv/bin/activate
 python -m bridge.main
+# v0.3 額外環境變數：
+SIRO_USE_AGENT_OS=true python -m bridge.main   # /chat opt-in 走 AgentOS
 ```
 
 ---
