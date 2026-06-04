@@ -329,6 +329,42 @@ bridge.OnTaskFailed += f => Debug.LogError($"task {f.task_id} 失敗: {f.error}"
 2. `Live2DModelController` component — 觸發 OnMaoClicked
 3. `PersonaClickHandler` component — 訂閱 OnMaoClicked、叫 SendTaskAsync
 
+**常用 clickableAreas 範例**：
+
+```yaml
+# 點 Mao 身體 → 切 happy 表情（5 秒後自動回 neutral）
+- area: body
+  task: mood.set
+  args:
+    - "emotion: happy"
+    - "duration_sec: 5"
+
+# 點 Mao 身體 → Mao 主動說話（v1.2 只 log、TTS 留 v1.5+）
+- area: body
+  task: chat.say
+  args:
+    - "text: 點我幹嘛？"
+
+# 點 Mao 身體 → 切換 persona（會觸發 Live2D model 重載）
+- area: body
+  task: persona.switch
+  args:
+    - "persona_id: another-persona"
+
+# 點 Mao 身體 → 記錄 motion（v1.2 只 log、不實際觸發；v1.5+ 訂閱執行）
+- area: body
+  task: motion.play
+  args:
+    - "motion_group: Idle"
+    - "motion_index: 0"
+
+# 點 Mao 身體 → Mao 召回對話
+- area: body
+  task: chat.summon
+  args:
+    # 無 args
+```
+
 ### 7. 跟現有 WS protocol 的關係
 
 1. bridge 端 WS message handler（接 `task`、推 ack/result/failed）— 0.5 天
