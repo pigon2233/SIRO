@@ -79,7 +79,7 @@ namespace Siro
                 var value = line.Substring(sep + 1).Trim();
                 if (string.IsNullOrEmpty(key))
                 {
-                    Debug.LogWarning($"[ClickableArea] 跳過空 key 的 arg: {line!r}");
+                    Debug.LogWarning($"[ClickableArea] 跳過空 key 的 arg: {line}");
                     continue;
                 }
                 obj[key] = ParseValue(value);
