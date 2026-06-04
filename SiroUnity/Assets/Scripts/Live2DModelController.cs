@@ -54,6 +54,14 @@ namespace Siro
                  "v1.2 MVP：只用單一 hit area = 'body'，不做 head/body 細分。\n" +
                  "v1.5+ 可改用 Cubism SDK 的 CubismHitDrawable 精確區分。")]
         public bool clickable = true;
+
+        [Header("Expression Blend（K5 KPI < 200ms）")]
+        [Tooltip("v1.2 表情切換延遲 < 200ms（量測 SetExpression 到 Cubism render 完成）\n" +
+                 "實作：SetExpression 立刻設 CurrentExpressionIndex（Cubism 內部 blend）\n" +
+                 "      + 等 blendLockDuration 避免連點時表情亂跳。\n" +
+                 "0 = 立即切換（不鎖、給快速 debug 用）。\n" +
+                 "0.3-0.5s = 預設、視覺上不閃爍。")]
+        public float blendLockDuration = 0.4f;
         [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）\n\n" +
                  "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public int[] eyeDrawableIndices = new[] { 87, 92 };
@@ -244,7 +252,16 @@ namespace Siro
         /// </summary>
         /// <param name="expressionId">Cubism expression ID，如 "F02" (happy)</param>
         /// <param name="blendDuration">過渡時間（秒），預設 0.5s 平滑切換</param>
-        public void SetExpression(string expressionId, float blendDuration = 0.5f)
+        public void SetExpression(string expressionId, float blendDuration = -1f)
+        {
+            // blendDuration < 0 → 用 inspector blendLockDuration 預設值
+            // blendDuration == 0 → 立即切換（不鎖、debug 用）
+            // blendDuration > 0 → 切換後鎖定該秒數避免連點
+            float effectiveDuration = blendDuration < 0f ? blendLockDuration : blendDuration;
+            SetExpressionInternal(expressionId, effectiveDuration);
+        }
+
+        private void SetExpressionInternal(string expressionId, float blendDuration)
         {
 #if SIRO_HAS_CUBISM
             if (_expressionController == null)
