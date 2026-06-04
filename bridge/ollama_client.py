@@ -65,16 +65,33 @@ class OllamaClient:
         )
         self.timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
 
+        # v0.3 is_available cache — 5s TTL 拿掉 hot path sync urllib
+        # 跟 HermesClient 一致，Ollama 狀態也不會每秒變
+        self._avail_cache_ts: float = 0.0
+        self._avail_cache_result: bool = False
+        self._avail_cache_ttl: float = 5.0
+
     def is_available(self) -> bool:
-        """檢查 Ollama server 是否活著"""
+        """檢查 Ollama server 是否活著
+
+        v0.3 改：5s TTL cache（理由同 HermesClient）。
+        """
+        import time
+        now = time.time()
+        if now - self._avail_cache_ts < self._avail_cache_ttl:
+            return self._avail_cache_result
+
+        # cache miss — 真的去問 Ollama
         try:
             url = f"{self.base_url}/api/tags"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status == 200
+                self._avail_cache_result = resp.status == 200
         except Exception as e:
             logger.debug(f"Ollama 不可用: {type(e).__name__}: {e}")
-            return False
+            self._avail_cache_result = False
+        self._avail_cache_ts = now
+        return self._avail_cache_result
 
     def chat(self, message: str, system_prompt: Optional[str] = None) -> OllamaResult:
         """

@@ -56,6 +56,13 @@ class HermesClient:
         self.timeout = timeout
         self.extra_args = extra_args or []
 
+        # v0.3 is_available cache — 5s TTL 拿掉 hot path sync subprocess
+        # 動機：is_available() 之前在 async path 同步跑，每次 request 卡 0.5-10s
+        # 5s 內的結果 cache 起來。hermes 狀態不會每秒變，5s 是合理 TTL。
+        self._avail_cache_ts: float = 0.0
+        self._avail_cache_result: bool = False
+        self._avail_cache_ttl: float = 5.0
+
     def _resolve_binary(self, override: Optional[str]) -> str:
         """決定實際要跑的 hermes 指令
 
@@ -87,7 +94,16 @@ class HermesClient:
         """檢查 hermes CLI 是否可用
 
         任何例外都視為「不可用」，不應該 propagate 出去。
+
+        v0.3 改：5s TTL cache。100 個 request 進來只查 1 次 subprocess，
+        避免在 async path 卡 0.5-10s × N。
         """
+        import time
+        now = time.time()
+        if now - self._avail_cache_ts < self._avail_cache_ttl:
+            return self._avail_cache_result
+
+        # cache miss — 真的去問 hermes
         try:
             result = subprocess.run(
                 [self.binary_path, "--version"],
@@ -97,10 +113,12 @@ class HermesClient:
                 errors="replace",
                 timeout=10,
             )
-            return result.returncode == 0
+            self._avail_cache_result = result.returncode == 0
         except Exception as e:
             logger.warning(f"hermes 不可用: {type(e).__name__}: {e}")
-            return False
+            self._avail_cache_result = False
+        self._avail_cache_ts = now
+        return self._avail_cache_result
 
     @staticmethod
     def _parse_hermes_output(raw: str) -> str:
