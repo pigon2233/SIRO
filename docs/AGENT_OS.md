@@ -1,6 +1,8 @@
 # SIRO Agent OS — 架構文件
 
 > v0.2+ 設計：把 bridge 從「純 HTTP server」升級成「**像作業系統一樣的後台 + 1 個前台 Mao**」
+>
+> v0.3 進度（2026-06-04）：骨架就緒 → `/chat` opt-in 走 AgentOS（`SIRO_USE_AGENT_OS=true`）。Task 加 `id`、EventBus `subscribe()` 回傳 `unsubscribe()`、新增 `wait_for_task()` helper。預設仍走 v0.2 sync 路徑（165 既有測試不動）。
 
 ## 目標
 
@@ -107,6 +109,7 @@ class Event:
 
 ### 不要過度工程
 - v0.2 只做最小可用骨架：AgentOS + EventBus + 第一個 task
+- v0.3 把 `/chat` 接上 AgentOS（opt-in via `SIRO_USE_AGENT_OS` env flag）— 證明「task 進得了 queue、等得到 result」
 - Telegram / 排程 / LLM tool calling 等 v1+ 才加
 - 不做 state persistence（v2 才加 SQLite）
 
@@ -144,14 +147,32 @@ async def on_completed(event: Event):
 state.agent_os.event_bus.subscribe("task.completed", on_completed)
 ```
 
-## v0.2 範圍
+## 範圍演進
+
+### v0.2 — 骨架
 
 **已做**：
 - ✅ `bridge/agent_os.py` — Task Queue + Event Bus + Worker Pool
-- ✅ `bridge/tasks/llm_reply_task.py` — 第一個任務（但還沒被 endpoint 呼叫，只是 API 存在）
+- ✅ `bridge/tasks/llm_reply_task.py` — 第一個任務（API 存在，但 endpoint 還沒呼叫）
 - ✅ `bridge/main.py` lifespan 啟動 AgentOS（3 個 worker）
 - ✅ `state.sessions_lock` — RLock 保護 sessions 並行讀寫
 - ✅ 14 個單元測試
+
+### v0.3 — 接到 endpoint（opt-in）
+
+**新增**：
+- ✅ `Task.id` 欄位（UUID4 hex[:8]）— 給 event 比對用
+- ✅ `EventBus.subscribe()` 回傳 `unsubscribe()` — 避免 handler 殘留
+- ✅ `AgentOS.wait_for_task(name, id, timeout)` — endpoint 等特定 task 完成
+- ✅ `bridge/tasks/llm_reply_task.py` — 真的被 `/chat` 呼叫了（透過 `create_llm_reply_task()` factory）
+- ✅ `state.use_agent_os` — `SIRO_USE_AGENT_OS=true` 才走新路徑，預設 false
+- ✅ 6 個 EventBus 測試（unsubscribe 不影響別人）+ 4 個 wait_for_task 測試（completed / failed / timeout / id 過濾）+ 3 個 Task.id 測試（唯一性 / 預設長度 / override）+ 4 個 /chat 整合測試
+- ✅ 總計 23 個 AgentOS 測試 + 4 個整合測試 = 27 個
+
+**設計決策**：
+- 預設關閉（v0.2 sync 路徑保留）— 165 既有測試不用改、production 行為不變
+- v0.4 觀察穩定後預設改 true
+- `wait_for_task` timeout 不 cancel task（worker 仍會跑完）— 避免「client timeout → task 半完成」的競態
 
 **未做**（v1+）：
 - ❌ Telegram bot
@@ -172,14 +193,14 @@ state.agent_os.event_bus.subscribe("task.completed", on_completed)
 | **v1.5** | LLM tool calling | bridge 支援 function calling schema，Mao 可以召喚任務（查股票、設提醒） |
 | **v2.0** | 任務持久化 | SQLite、bridge 重啟可恢復；multi-process / K8s 部署就緒 |
 
-## 跟 Mao 對話的內部流程（v0.2+）
+## 跟 Mao 對話的內部流程（v0.2 vs v0.3）
+
+### v0.2 — 預設路徑（SIRO_USE_AGENT_OS 未設或 =false）
 
 ```
 Unity WebSocket 送 {"type": "chat", "message": "..."}
         ↓
 bridge /ws 端點
-        ↓
-（v0.2 仍用 sync hermes — 為了保持 UX 一致；未來可改 enqueue）
         ↓
 hermes.chat() via asyncio.to_thread (不卡 event loop)
         ↓
@@ -192,18 +213,53 @@ WebSocket 回 {"type": "response", "text": "...", "emotion": "..."}
 Unity EmotionDisplay 切表情
 ```
 
-AgentOS worker pool 同步跑（但目前**還沒**被 /chat 呼叫 — 是「待機」狀態，等 v1+ Telegram / schedule 來用）。
+### v0.3 — opt-in 路徑（SIRO_USE_AGENT_OS=true）
+
+```
+Unity WebSocket 送 {"type": "chat", "message": "..."}
+        ↓
+bridge /ws 端點（或 /chat HTTP — 兩條都走同個 handler）
+        ↓
+create_llm_reply_task(state, user_id, message, persona, session)
+        ↓
+state.agent_os.enqueue(task)  ← task.id 進 queue
+        ↓
+Worker 從 queue 拉 task 跑：
+   - asyncio.to_thread(hermes.chat) — 不卡 worker event loop
+   - parser.parse() 取 emotion
+   - state.sessions[session_id] 寫入（task 內做，endpoint 不重複寫）
+   - emit "task.completed" event 帶 task_id + result dict
+        ↓
+endpoint await state.agent_os.wait_for_task("llm.reply", task.id, 600s)
+        ↓
+拿 result 組 ChatResponse 回 Unity
+```
+
+**v0.3 跟 v0.2 行為差異**：
+- v0.2: 單一 request 走 asyncio.to_thread，event loop 讓出 1 次
+- v0.3: enqueue → 切去 worker → endpoint 用 event bus 等 callback，request handler 跟 worker 完全解耦
+- 失敗處理：v0.2 直接 raise；v0.3 task.failed event 帶 error 字串 → 走 fallback
+- Timeout：v0.2 沒有；v0.3 有 600s 預設（任務仍在 worker 跑、不 cancel）
 
 ## 驗收測試
 
-`tests/bridge/test_agent_os.py`：
+`tests/bridge/test_agent_os.py`（**23 個**）：
 - 6 個 EventBus 測試（subscribe/emit、wildcard、multi-subscriber、exception 隔離、sync handler、no-subscriber）
-- 5 個 AgentOS Workers 測試（start/stop、enqueue、並行、failure 隔離、event firing）
+- 2 個 EventBus unsubscribe 測試（v0.3：subscribe 回傳 unsub / 不影響別人）
+- 4 個 AgentOS Workers 測試（start/stop、enqueue、並行、failure 隔離、event firing）+ wait_for_task 測試放在下面
 - 3 個 sessions_lock 併發測試（concurrent append、RLock nested、100 thread stress）
+- 4 個 `wait_for_task` 測試（v0.3：completed / failed / timeout / 同名不同 id 過濾）
+- 3 個 `Task.id` 測試（v0.3：唯一性 / 預設 8 字 hex / 可 override）
+
+`tests/bridge/test_agent_os_integration.py`（**4 個**，v0.3 新增）：
+- flag=true 時 /chat 確實 enqueue + 拿 result 組 ChatResponse
+- hermes.chat 失敗 → 走 fallback（200 而非 502）
+- flag 預設 false（沒設 env）
+- env=true 觸發 flag
 
 執行：
 ```bash
-python -m pytest tests/bridge/test_agent_os.py -v
+python -m pytest tests/bridge/test_agent_os.py tests/bridge/test_agent_os_integration.py -v
 ```
 
 ## 怎麼看 AgentOS 跑起來
@@ -213,11 +269,15 @@ python -m pytest tests/bridge/test_agent_os.py -v
 AgentOS 啟動（3 個 worker，task queue + event bus 就緒）
 ```
 
-之後每個 enqueue 會 log：
+之後每個 enqueue 會 log（**v0.3 格式帶 [id=xxx]**）：
 ```
-[AgentOS] enqueue my.task (queue size: 0)
-[AgentOS] worker 1 跑 my.task (queue 等待 5ms)
-[AgentOS] my.task 完成 (12ms)
+[AgentOS] worker 1 跑 llm.reply[id=a3f8b2c1] (queue 等待 5ms)
+[AgentOS] llm.reply[id=a3f8b2c1] 完成 (12ms)
 ```
+
+v0.3 多了：
+- `[id=xxx]` — Task.id（UUID4 hex[:8]）— endpoint 對應 task 用
+- 失敗時 log 改 `logger.exception` 帶 stack trace
+- 失敗會 emit `task.failed` event 帶 `task_id` + `error` + `traceback`
 
 可以從這看出 task 排隊 / 執行 / 完成時間，方便除錯效能問題。
