@@ -13,6 +13,7 @@
 //
 
 using UnityEngine;
+using UnityEngine.EventSystems;
 using System;  // v0.2+ PlayMotion 用 try/catch
 
 // 這兩個 namespace 在裝 Cubism SDK 後才存在。
@@ -28,7 +29,7 @@ namespace Siro
 #if SIRO_HAS_CUBISM
     [RequireComponent(typeof(CubismModel))]
 #endif
-    public class Live2DModelController : MonoBehaviour
+    public class Live2DModelController : MonoBehaviour, IPointerClickHandler
     {
         [Header("Debug")]
         public bool verboseLogging = true;
@@ -46,6 +47,13 @@ namespace Siro
                  "避免閉眼但瞳孔露出的視覺問題。用 Tools/SIRO/Drawable Inspector 找出眼球的 index。\n\n" +
                  "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public string[] hideEyeOnExpressions = new[] { "exp_02", "exp_03" };
+
+        [Header("v1.2 Click Detection (SendTask OnClick)")]
+        [Tooltip("啟用滑鼠點擊 Mao 觸發 OnMaoClicked event。" +
+                 "需要 Mao prefab 有 2D Collider（給 OnPointerClick 用）。" +
+                 "v1.2 MVP：只用單一 hit area = 'body'，不做 head/body 細分。\n" +
+                 "v1.5+ 可改用 Cubism SDK 的 CubismHitDrawable 精確區分。")]
+        public bool clickable = true;
         [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）\n\n" +
                  "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public int[] eyeDrawableIndices = new[] { 87, 92 };
@@ -204,6 +212,32 @@ namespace Siro
 #endif
 
         // ==================== 公開 API ====================
+
+        /// <summary>
+        /// v1.2 SendTask：使用者點 Mao 觸發（OnPointerClick 收到時 invoke）
+        /// 參數：hit area name — v1.2 MVP 一律回傳 "body"（整體點擊）
+        /// v1.5+ 改用 CubismHitDrawable 精確區分 "head"/"body"/自訂
+        /// 訂閱者（PersonaClickHandler）會用 hitArea 查 persona YAML 的 clickable_areas
+        /// </summary>
+        public event Action<string> OnMaoClicked;
+
+        /// <summary>
+        /// Unity EventSystems IPointerClickHandler 實作 — 需要 Mao GameObject 上有 Collider2D
+        /// 沒 Collider 不會觸發（這是 Unity 標準行為、不是 bug）
+        /// </summary>
+        public void OnPointerClick(PointerEventData eventData)
+        {
+            if (!clickable)
+            {
+                if (verboseLogging) Debug.Log("[Live2DModelController] clickable=false、忽略點擊");
+                return;
+            }
+            // v1.2 MVP：不細分 hit area、整體點擊 = "body"
+            // v1.5+ 可依 eventData.position + camera projection 算 local Y 判斷 head vs body
+            const string hitArea = "body";
+            if (verboseLogging) Debug.Log($"[Live2DModelController] Mao 點擊 (hitArea={hitArea})");
+            OnMaoClicked?.Invoke(hitArea);
+        }
 
         /// <summary>
         /// 切換 expression。

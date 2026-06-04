@@ -359,7 +359,7 @@ namespace Siro
                         _pendingTasks.Remove(taskId);
                     }
                     throw new TimeoutException(
-                        $"[HermesBridge] SendTask {name!r} (task_id={taskId}) 超過 {timeoutSec}s 沒回 result"
+                        $"[HermesBridge] SendTask {name!} (task_id={taskId}) 超過 {timeoutSec}s 沒回 result"
                     );
                 }
 
