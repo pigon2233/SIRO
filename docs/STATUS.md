@@ -6,7 +6,12 @@
 ## 一句話總結
 
 SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS。
-目前 v0.2 狀態：**1 人本機單 Mao、跟 Mao 中文對話可通、MiniMax-M3 雲端 LLM、9 種情緒、待機動作、繁體中文 UI**。技術債清乾淨，K10 測試覆蓋率 83%。
+目前 v0.3 狀態：**1 人本機單 Mao、跟 Mao 中文對話可通、MiniMax-M3 雲端 LLM、9 種情緒、待機動作、繁體中文 UI、AgentOS 接到 /chat**。技術債清乾淨，K10 測試覆蓋率 83%。
+
+### 版本演進
+
+- **v0.2**（已完成）：AgentOS 骨架 — Task Queue + Event Bus + Worker Pool + 14 個測試
+- **v0.3**（2026-06-04）：`/chat` opt-in 走 AgentOS（`SIRO_USE_AGENT_OS=true`）。Task 加 `id`、EventBus 改回傳 `unsubscribe()`、新增 `wait_for_task()`。23 個 AgentOS 測試 + 4 個 /chat 整合測試 = 27 個新測試（總計 188）。預設仍走 v0.2 sync 路徑，觀察穩定後 v0.4 預設改 true。
 
 ---
 
@@ -26,7 +31,7 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 
 ### 計畫 / 架構
 - [`LIVE2D_AI_AGENT_OS_PLAN.md`](../LIVE2D_AI_AGENT_OS_PLAN.md) — 原始完整計畫書（v2.0）
-- [`docs/AGENT_OS.md`](AGENT_OS.md) — **v0.2 後台作業系統架構（最近寫的）**
+- [`docs/AGENT_OS.md`](AGENT_OS.md) — **v0.3 後台作業系統架構（最近更新）**
 - [`docs/PERSONA.md`](PERSONA.md) — Persona YAML schema
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — 系統架構
 - [`docs/GAPS.md`](GAPS.md) — 10 個 GAPS 缺口
@@ -87,12 +92,17 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 |---|---|---|
 | 1 | 待機動作 loop（mtn_01 自動 loop） | `2d77361` |
 | 2 | i18n zh-TW.json + Localization.cs | `36604ea`、`3e3d1f2` |
-| 3 | **AgentOS 骨架**（Task Queue + Event Bus + Worker Pool） | `f56c4e2` |
-| 4 | 表情平滑過渡 | ⏳ 暫停 |
-| 5 | 點擊 Mao 觸發 motion | ⏳ 暫停 |
-| 6 | Loading 狀態視覺 | ⏳ 暫停 |
-| 7 | 視覺設定檔 | ⏳ 暫停 |
-| 8 | 截圖功能 | ⏳ 暫停 |
+| 3 | **AgentOS 骨架**（v0.2，Task Queue + Event Bus + Worker Pool） | `f56c4e2` |
+| 4 | **AgentOS 接到 /chat**（v0.3，opt-in via `SIRO_USE_AGENT_OS`） | `73b78b8`、`6698fa6`、`da28d9f` |
+| 5 | 表情平滑過渡 | ⏳ 暫停 |
+| 6 | 點擊 Mao 觸發 motion | ⏳ 暫停 |
+| 7 | Loading 狀態視覺 | ⏳ 暫停 |
+| 8 | 視覺設定檔 | ⏳ 暫停 |
+| 9 | 截圖功能 | ⏳ 暫停 |
+
+### ✅ Phase 2 → v0.3 收尾（已完成）
+- ✅ PLAN_REVISION_v2.1.md（15 項計畫書修訂補完）| `8936d54`
+- ✅ `AGENT_OS.md` 補 v0.3 現況 | `0066b56` |
 
 ---
 
@@ -108,11 +118,12 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 └─────────────────────────────────────────────────────────────┘
         ↕ WebSocket (JSON) / HTTP REST
 ┌─ Backend: bridge (Python FastAPI) ──────────────────────────┐
-│  - /chat 跟 /ws 端點（同步，透過 asyncio.to_thread）            │
-│  - /personas API（v0.2 多角色切換）                          │
+│  - /chat 跟 /ws 端點（v0.2 sync 預設 / v0.3 opt-in AgentOS）    │
+│  - /personas API（多角色切換）                              │
 │  - LLM client：HermesClient（雲端 MiniMax-M3）+ OllamaClient   │
 │  - EmotionParser（9 情緒 → Live2D signal，per-persona cache）   │
-│  - AgentOS（v0.2+）：Task Queue + Event Bus + Worker Pool      │
+│  - AgentOS（v0.3）：Task Queue + Event Bus + Worker Pool      │
+│                    + Task.id + wait_for_task()                │
 │  - persona YAML 載入、jieba 斷詞、表情 tag 解析                 │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -142,7 +153,7 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 | Unity 角色控制 | `SiroUnity/Assets/Scripts/Live2DModelController.cs` | `SetExpression(id)`、`PlayMotion(clip)`、`SetQuirks(...)` |
 | Unity Persona 切換 | `SiroUnity/Assets/Scripts/PersonaManager.cs` | `ApplyPersona(id)` |
 | bridge 啟動 | `bridge/main.py` | `lifespan()` 啟動 AgentOS + parser cache |
-| bridge chat 端點 | `bridge/main.py:303-` | `/chat` (sync LLM call) |
+| bridge chat 端點 | `bridge/main.py:303-` | `/chat` (v0.2 sync / v0.3 opt-in AgentOS via `SIRO_USE_AGENT_OS`) |
 | bridge WS 端點 | `bridge/main.py:415-` | `/ws` (WebSocket) |
 | bridge 排程任務 | `bridge/agent_os.py` | `AgentOS.enqueue(Task(...))` |
 | 第一個範例任務 | `bridge/tasks/llm_reply_task.py` | `create_llm_reply_task()` |
@@ -153,7 +164,7 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 
 | 指標 | 值 |
 |---|---|
-| 測試總數 | 165 passed + 1 xfailed（已修，剩 1 bug 記錄）|
+| 測試總數 | 188 passed（165 → 188：v0.3 AgentOS 加 9 個 + /chat 整合加 4 個）|
 | 覆蓋率 | 83% |
 | 測試目錄 | `tests/bridge/` |
 | 跑測試 | `python -m pytest tests/bridge/ -q` |
@@ -171,13 +182,15 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 
 ## 進行中 / 暫停項目
 
-### v0.2 完成的
-- ✅ AgentOS 骨架（task queue、event bus、worker pool）
-- ✅ 第一個 task：`llm_reply_task`（封裝現有 /chat 邏輯）
-- ✅ 14 個新測試（EventBus 6 + Worker 5 + RLock 3）
-- ✅ `docs/AGENT_OS.md` 架構文件
+### v0.2 + v0.3 完成的
+- ✅ AgentOS 骨架（v0.2，task queue、event bus、worker pool）
+- ✅ 第一個 task：`llm_reply_task`（v0.2 封裝 /chat 邏輯、v0.3 真的被 /chat 呼叫）
+- ✅ v0.3 增強：Task.id、EventBus `unsubscribe()`、`wait_for_task()`、`SIRO_USE_AGENT_OS` flag
+- ✅ 23 個 AgentOS 測試（v0.2 14 個 + v0.3 9 個：unsubscribe 2 + wait_for_task 4 + Task.id 3）
+- ✅ 4 個 /chat 整合測試（v0.3 新增）
+- ✅ `docs/AGENT_OS.md` 架構文件（v0.2 寫、v0.3 更新到 commit 0066b56）
 
-### v0.2 還沒做（按優先度）
+### v1+ 還沒做（按優先度）
 | 項目 | 原因 | 預估 |
 |---|---|---|
 | Unity `SendTask()` API | AgentOS 是後端，Unity 端還沒接 | 半天 |
@@ -253,17 +266,16 @@ python -m pytest tests/bridge/ --cov=bridge --cov-report=term  # 含覆蓋率
 ## 最近的 commit（最近 12 個）
 
 ```
-34b0a24 (前一個 session 結尾)
-...
-700679f fix(persona): max_tokens 改回 300
-07ca670 perf(persona): 縮簡 SIRO system_prompt 加速 LLM 回應
-85e9518 diag(bridge): /ws 加 timing log + jieba warning 印 Python path
-f7d135f perf(bridge): per-persona EmotionParser cache + chat endpoint timing log
-7b70ee1 fix(unity): 取消「只有 1 個 persona 就隱藏齒輪」邏輯
-fe6eb3a feat(unity): 設定按鈕改用 picture/gear.png icon
-2d77361 feat(unity): Phase 2 待機動作 loop
-3e3d1f2 feat(unity): Phase 2 i18n PersonaSelectorUI 接入
-36604ea feat(unity): Phase 2 i18n zh-TW.json + Localization.cs
+0066b56 docs(AGENT_OS): 補 v0.3 現況 — /chat opt-in 走 AgentOS
+da28d9f test(bridge): /chat AgentOS 整合測試 — flag=true 路徑
+6698fa6 feat(bridge): /chat 走 AgentOS via SIRO_USE_AGENT_OS env flag (v0.3 opt-in)
+73b78b8 feat(bridge): AgentOS Task.id + EventBus unsubscribe + wait_for_task
+8936d54 docs(plan): 寫 PLAN_REVISION_v2.1.md — v2.0 計畫書 15 項修訂補完
+7aa135b docs(STRATEGIC_NOTES): Q2 改結論 — 不繞過 hermes，走 hermes 介面 streaming
+fa9bf63 fix(perf): is_available() 5s TTL cache 拿掉 hot path sync subprocess
+d70d637 docs: 寫 PLAN_REVIEW_v0.3.md — v2.1 之外的增補 + 跨文件衝突
+088f7f3 diag(bridge): /chat + /ws 加 5 段细粒度計時診斷 60s 瓶頸
+46f3625 docs: 寫 STATUS.md 總覽 + STRATEGIC_NOTES.md 戰略決策
 f56c4e2 feat(bridge): v0.2 AgentOS 骨架 — Task Queue + Event Bus + Worker Pool
 acc5a9a fix(unity): 修 C# 編譯錯誤
 ```
