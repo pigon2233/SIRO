@@ -18,6 +18,9 @@
 using System;
 using System.IO;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;  // 新 Input System：F12 熱鍵
+#endif
 
 namespace Siro
 {
@@ -46,10 +49,34 @@ namespace Siro
 
         private void Update()
         {
-            if (enableF12Hotkey && Input.GetKeyDown(KeyCode.F12))
+            if (!enableF12Hotkey) return;
+            if (CheckF12Pressed())
             {
                 CaptureNow();
             }
+        }
+
+        /// <summary>
+        /// 同時支援舊 Input Manager 跟新 Input System — 依 Player Settings 的
+        /// Active Input Handling 自動切換（透過 ENABLE_INPUT_SYSTEM 編譯 flag）
+        /// </summary>
+        private bool CheckF12Pressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            // 新 Input System（Package）
+            if (Keyboard.current != null && Keyboard.current.f12Key.wasPressedThisFrame)
+            {
+                return true;
+            }
+#endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            // 舊 Input Manager
+            if (Input.GetKeyDown(KeyCode.F12))
+            {
+                return true;
+            }
+#endif
+            return false;
         }
 
         private void Start()
