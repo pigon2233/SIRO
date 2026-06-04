@@ -13,6 +13,7 @@ bridge/tasks/builtin.py - v1.2 預設 task handlers
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -26,18 +27,62 @@ logger = logging.getLogger("siro.tasks.builtin")
 
 # ==================== mood.set ====================
 
+async def _push_mood_response(
+    ctx: dict, emotion_str: str, intensity: float, source: str
+) -> None:
+    """mood 相關的 response 推送 helper（給 mood_set 跟 auto-revert 共用）
+
+    v1.2+：把 emotion 轉成 Live2D signal、推 response 給 Unity
+    失敗只 log warning、不 raise（response 是 side effect、不應破壞主 task）
+    """
+    from ..emotion_parser import EmotionParser
+    from ..prompts import get_persona_expressions
+
+    state = ctx["state"]
+    persona_name = state.active_persona or "siro-default"
+    expressions = get_persona_expressions(persona_name)
+    parser = EmotionParser(persona_expressions=expressions)
+    try:
+        live2d_signal = parser.to_live2d_signal(Emotion(emotion_str), intensity)
+    except Exception as e:
+        logger.warning(
+            f"[mood] 推 response 失敗（persona {persona_name!r} 沒 {emotion_str!r} 設定）: {e}"
+        )
+        return
+
+    if "websocket" not in ctx or live2d_signal is None:
+        return
+
+    try:
+        await ctx["websocket"].send_json({
+            "type": "response",
+            "text": "",  # mood 不講話、只是切表情
+            "emotion": emotion_str,
+            "intensity": intensity,
+            "live2d": live2d_signal.model_dump(),
+            "session_id": f"{ctx['user_id']}-mood",
+            "_source": source,  # "mood.set" 或 "mood.auto_revert" 給 Unity 區分
+        })
+    except Exception as e:
+        logger.warning(f"[mood] 推 response 給 Unity 失敗: {e}")
+
+
 async def mood_set(args: dict, ctx: dict) -> dict:
     """
-    設當前 mood — 影響後續 chat 的 emotion 預設
-    v1.2 還會推一條 response 給 Unity → 表情立即切換
+    設當前 mood — 影響後續 chat 的 emotion 預設 + 推 response 給 Unity 切表情
 
     Args:
-        args: {"emotion": "happy", "intensity": 0.7}（intensity optional，預設 0.7）
+        args: {
+            "emotion": "happy",                  # 必填、9 個 persona emotion 之一
+            "intensity": 0.7,                   # optional、預設 0.7、範圍 0-1
+            "duration_sec": 10,                 # optional、預設 0 = 永久、
+                                                #   > 0 則 N 秒後自動回 neutral
+        }
         ctx: {state, user_id, task_id, websocket}
     Returns:
-        {"ok": True, "mood": {"emotion": "happy", "intensity": 0.7}}
+        {"ok": True, "mood": {"emotion": "happy", "intensity": 0.7, "duration_sec": 0}}
     Raises:
-        ValueError: emotion 不合法
+        ValueError: emotion 不合法 / intensity 越界
     """
     emotion_str = args.get("emotion")
     if not emotion_str:
@@ -46,6 +91,10 @@ async def mood_set(args: dict, ctx: dict) -> dict:
     intensity = float(args.get("intensity", 0.7))
     if not (0.0 <= intensity <= 1.0):
         raise ValueError(f"mood.set: intensity {intensity} out of range [0, 1]")
+
+    duration_sec = float(args.get("duration_sec", args.get("duration", 0)))
+    if duration_sec < 0:
+        raise ValueError(f"mood.set: duration_sec {duration_sec} 不能負的")
 
     # 驗證 emotion 合法（用現有 Emotion enum）
     valid_emotions = {e.value for e in Emotion}
@@ -56,51 +105,58 @@ async def mood_set(args: dict, ctx: dict) -> dict:
         )
 
     state = ctx["state"]
+    user_id = ctx["user_id"]
+
     # 設在 state 上（給後續 /chat 的 emotion_parser 預設用）
     if not hasattr(state, "current_mood") or state.current_mood is None:
         state.current_mood = {}
-    state.current_mood[ctx["user_id"]] = {
+    state.current_mood[user_id] = {
         "emotion": emotion_str,
         "intensity": intensity,
         "set_at": time.time(),
+        "duration_sec": duration_sec,  # 0 = 永久
     }
 
-    # v1.2+：主動推一條 response 給 Unity → 表情立即切換
-    # 用 persona 的 emotion_parser 把 mood emotion 轉成 Live2DSignal
-    # （跟 /chat response 一樣的 pipeline — EmotionDisplay 直接套用）
-    from ..emotion_parser import EmotionParser
-    from ..models import Live2DSignal
-    from ..prompts import get_persona_expressions, get_personality
+    # 推 response 給 Unity 切表情
+    await _push_mood_response(ctx, emotion_str, intensity, source="mood.set")
 
-    persona_name = state.active_persona or "siro-default"
-    expressions = get_persona_expressions(persona_name)
-    parser = EmotionParser(persona_expressions=expressions)
-    try:
-        live2d_signal = parser.to_live2d_signal(Emotion(emotion_str), intensity)
-    except Exception as e:
-        logger.warning(f"[mood.set] 推 response 失敗（persona 沒這個 emotion 設定）: {e}")
-        live2d_signal = None
+    # duration_sec > 0：排程 auto-revert 到 neutral
+    if duration_sec > 0:
+        async def _auto_revert_to_neutral():
+            await asyncio.sleep(duration_sec)
+            # 檢查 mood 是否還是我們設的、不是的話就放棄（user 已經改過了）
+            current = state.current_mood.get(user_id, {})
+            if current.get("emotion") != emotion_str:
+                logger.info(
+                    f"[mood.auto_revert] user={user_id} mood 已改為 {current.get('emotion')!r}、"
+                    f"放棄 revert（原始 {emotion_str!r}）"
+                )
+                return
+            logger.info(
+                f"[mood.auto_revert] user={user_id} → neutral（{duration_sec}s 到期）"
+            )
+            # 推 neutral 給 Unity、state 也更新
+            await _push_mood_response(ctx, "neutral", 0.5, source="mood.auto_revert")
+            state.current_mood[user_id] = {
+                "emotion": "neutral",
+                "intensity": 0.5,
+                "set_at": time.time(),
+                "duration_sec": 0,
+            }
+        asyncio.create_task(_auto_revert_to_neutral())
+        logger.info(
+            f"[mood.set] user={user_id} → emotion={emotion_str} intensity={intensity} "
+            f"duration={duration_sec}s（{duration_sec}s 後自動回 neutral）"
+        )
+    else:
+        logger.info(
+            f"[mood.set] user={user_id} → emotion={emotion_str} intensity={intensity} "
+            f"（永久）"
+        )
 
-    if live2d_signal is not None and "websocket" in ctx:
-        try:
-            await ctx["websocket"].send_json({
-                "type": "response",
-                "text": "",  # mood.set 不講話、只是切表情
-                "emotion": emotion_str,
-                "intensity": intensity,
-                "live2d": live2d_signal.model_dump(),
-                "session_id": f"{ctx['user_id']}-mood",
-                "_source": "mood.set",  # 給 Unity 區分是 mood task 來的（不是 chat）
-            })
-        except Exception as e:
-            logger.warning(f"[mood.set] 推 response 給 Unity 失敗: {e}")
-
-    logger.info(
-        f"[mood.set] user={ctx['user_id']} → emotion={emotion_str} intensity={intensity}"
-    )
     return {
         "ok": True,
-        "mood": state.current_mood[ctx["user_id"]],
+        "mood": state.current_mood[user_id],
     }
 
 

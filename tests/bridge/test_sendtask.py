@@ -289,6 +289,62 @@ class TestStateCurrentMood:
             assert failed["type"] == "task_failed"
             assert "intensity" in failed["error"].lower()
 
+    def test_mood_set_with_duration_records_in_state(
+        self, client, mock_hermes_setup, registered_tasks
+    ):
+        """duration_sec > 0 → state.current_mood.duration_sec 設進去
+        （auto-revert 的時序邏輯手動測、time.sleep 會 block event loop 無法 verify asyncio.create_task）"""
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({
+                "type": "task",
+                "task_id": "deadbeef",
+                "name": "mood.set",
+                "args": {"emotion": "happy", "intensity": 0.8, "duration_sec": 10},
+                "user_id": "carol",
+            })
+            ws.receive_json()  # ack
+            ws.receive_json()  # response (happy)
+            result = ws.receive_json()
+            assert result["type"] == "task_result"
+            assert result["result"]["mood"]["emotion"] == "happy"
+            assert result["result"]["mood"]["duration_sec"] == 10
+            # state 也有 duration_sec
+            assert state.current_mood["carol"]["duration_sec"] == 10
+
+    def test_mood_set_without_duration_is_permanent(
+        self, client, mock_hermes_setup, registered_tasks
+    ):
+        """沒帶 duration_sec → 預設 0（永久）、state 記錄"""
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({
+                "type": "task",
+                "task_id": "aaaabbbb",
+                "name": "mood.set",
+                "args": {"emotion": "surprised", "intensity": 0.9},
+                "user_id": "ed",
+            })
+            ws.receive_json()  # ack
+            ws.receive_json()  # response
+            result = ws.receive_json()
+            assert result["result"]["mood"]["duration_sec"] == 0
+            assert state.current_mood["ed"]["duration_sec"] == 0
+
+    def test_mood_set_validates_duration(
+        self, client, mock_hermes_setup, registered_tasks
+    ):
+        """duration_sec 負數 → handler raise → task_failed"""
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({
+                "type": "task",
+                "task_id": "eeff0011",
+                "name": "mood.set",
+                "args": {"emotion": "happy", "duration_sec": -5},
+            })
+            ws.receive_json()  # ack
+            failed = ws.receive_json()
+            assert failed["type"] == "task_failed"
+            assert "duration" in failed["error"].lower()
+
 
 # ==================== Test list_tasks ====================
 
