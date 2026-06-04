@@ -37,45 +37,65 @@
 
 ## Q2: Streaming 回應？
 
-### 決定
-**等 v0.3 量測實際 TTFT vs total time 再決定**。
+### 決定（2026-06-04 更新）
+**透過 hermes 介面做 streaming，不繞過 hermes**。等 hermes gateway / proxy 子命令支援 SSE 後接入。
 
-### 瓶頸分析
+### 為什麼改變
+原本結論是「繞過 hermes 寫 MiniMaxClient 直連 MiniMax-M3 API」，
+但 2026-06-04 使用者決策 A：hermes 是 SIRO 的 LLM 抽象層，**不繞過**。
+Streaming 要走 hermes 內部介面（gateway / proxy）來做。
+
+### 瓶頸分析（不變）
 從 2026-06-04 觀察的 18-20s hermes time 拆解：
 
 | 階段 | 時間 | Streaming 救得了嗎 |
 |---|---|---|
-| hermes CLI 啟動 | ~2-3s | ❌ 跳過 hermes 才救得了 |
+| hermes CLI 啟動 | ~2-3s | ❌ 跳過 hermes 才救得了（但不能跳過） |
 | Cloud LLM cold connect | ~3-5s | ❌ 雲端事 |
 | **TTFT**（第一個 token） | ~3-5s | ❌ 雲端事 |
-| 完整生成 ~150 tokens | ~5-8s | ✅ 邊生成邊推 |
+| 完整生成 ~150 tokens | ~5-8s | ✅ 邊生成邊推（透過 hermes streaming 介面） |
 | 收尾 + parse | ~1-2s | ❌ |
 
 **TTFT 5-8s 是 cloud LLM 現實**。Streaming 救不了 TTFT，但能救「感覺」：
 - 沒 streaming：使用者等 18s 看到「你好~ 今天想聊什麼？」
 - 有 streaming：使用者 5s 看到「你」、8s 看到「你好」、12s 看到「你好~ 今天」...
 
-### 選項
-| 解法 | 優點 | 缺點 |
-|---|---|---|
-| **A. 繞過 hermes 寫 MiniMaxClient** | 真的 SSE streaming、TTFT 開始就能推 chunk | 失去 hermes 的會話 / tool calling（SIRO 沒用） |
-| **B. 接受現狀 18s** | 0 工程 | user 繼續等 |
-| **C. 換更快的雲端模型** | TTFT 降到 1-2s | 要找新 API、可能有 quota 問題 |
+### 選項（更新）
+| 解法 | 優點 | 缺點 | 狀態 |
+|---|---|---|---|
+| ~~A. 繞過 hermes 寫 MiniMaxClient~~ | ~~真 SSE streaming~~ | ~~失去 hermes 整合~~ | ❌ **不採用**（使用者 A 案否決） |
+| **B. hermes 介面加 streaming** | 保留 hermes 抽象、sse via gateway/proxy | hermes 限制（要查 gateway 支援） | ✅ **v0.4+ 路線** |
+| C. 接受現狀 18s | 0 工程 | user 繼續等 | v0.2 現實 |
+| D. 換更快的雲端模型 | TTFT 降到 1-2s | 要找新 API、可能有 quota 問題 | v0.5+ 評估 |
 
-### 怎麼決定
-1. **量測**（v0.3）：
-   - 改 hermes 加 streaming flag 看能不能用
-   - 改 `MiniMax-M3` API 直接打，看 SSE 是否真的改善 perceived UX
-2. **評估**：
-   - 改善 > 30% perceived → 做 A
-   - 改善 < 30% → 不值得
-3. **實作**（如果做）：
-   - 新檔 `bridge/streaming_client.py`：直連 MiniMax-M3，用 httpx + SSE
+### 怎麼決定（更新）
+1. **查 hermes 能力**（v0.3）：
+   - `hermes proxy` 子命令是不是 OpenAI-compatible HTTP server？能不能 SSE？
+   - `hermes gateway` 是 polling 還是 webhook？能不能推 streaming？
+2. **量測**（v0.3）：
+   - 找 hermes 能做 streaming 的介面
+   - 量測 actual TTFT vs total time 確認 streaming 改善程度
+3. **實作**（v0.4+）：
    - bridge 加 `chat_stream(message) -> AsyncIterator[chunk]`
+   - 走 hermes 介面（不是直連 MiniMax）
    - /ws 改用 `chat_stream` 邊收邊推 Unity
    - Unity 端 incremental text rendering
 
 ### v0.2 行動
 - 寫這份文件 ✅
-- **不**先動 streaming 程式碼（避免 premature optimization）
-- v0.3 之後量測、看數據決定
+- v0.3 查 hermes 能力 + 量測 → 決定要不要做
+- **不**繞過 hermes（per 使用者 A 案）
+
+---
+
+## 跟 PLAN_REVIEW_v0.3.md 的對齊
+
+本檔（STRATEGIC_NOTES）在使用者 6/4 看完 PLAN_REVISION_v2.1 後寫，
+但 v2.1 跟使用者的 A 案衝突（v2.1 建議繞過、使用者說不繞過）。
+
+PLAN_REVIEW_v0.3.md（2026-06-04 修訂）已對齊 A 案，把本檔 Q2 結論同步更新。
+
+未來 v1.0+ 修訂會再加：
+- 真的做 hermes streaming 介面評估的結果
+- B (hermes 介面) 路線圖細節
+- C/D (接受現狀 / 換模型) 決策依據
