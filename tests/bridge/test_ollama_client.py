@@ -23,7 +23,7 @@ class TestInit:
         c = OllamaClient()
         assert c.base_url == "http://localhost:11434"
         assert c.model == "llama3.2:3b-instruct-q4_0"
-        assert c.timeout == 15  # 預設 15s
+        assert c.timeout == 3  # v1.2+ 預設 3s（fallback 快速失敗、走 hard fallback）
 
     def test_env_override(self, clean_env):
         clean_env.setenv("SIRO_FALLBACK_LLM_BASE_URL", "http://gpu-box:11434")

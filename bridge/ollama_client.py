@@ -41,7 +41,11 @@ class OllamaResult:
 class OllamaClient:
     """本地 Ollama 的 Python 封裝"""
 
-    DEFAULT_TIMEOUT = 15  # fallback 自己也要有上限，否則 UI 會卡住
+    DEFAULT_TIMEOUT = 3  # fallback 自己也要有上限，否則 UI 會卡住
+    # v1.2+ 縮短：原本 15s 太長，dev box 沒裝 hermes 時每個 chat 都要等 15s
+    # 才掉到 hard fallback。降到 3s — 3s 內 Ollama 沒回就放棄、走 persona 靜態文字
+    # production（Ollama 真的有跑、3-5s 回）剛好、慢一點也只多等幾秒
+    # 從 .env SIRO_FALLBACK_LLM_TIMEOUT_SEC 讀、可調
 
     def __init__(
         self,
