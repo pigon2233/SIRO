@@ -79,13 +79,15 @@ namespace Siro
         public float blinkDuration = 0.20f;
 
         [Tooltip("啟用 scale-based 呼吸（idleMotion 沒設時的 fallback）\n" +
-                 "0.98 ↔ 1.02 緩慢振盪、4 秒一個週期、模擬呼吸。\n" +
+                 "模擬真實呼吸曲線（吸氣快、hold、吐氣慢）、不是對稱 sin。\n" +
                  "有 mtn_01.anim（呼吸動畫）時可關、避免雙重呼吸。")]
         public bool enableBreathingFallback = true;
-        [Tooltip("呼吸振幅（0.02 = ±2%、預設）")]
-        public float breathingAmplitude = 0.02f;
+        [Tooltip("呼吸振幅（0.015 = ±1.5%、預設比之前小、自然）")]
+        public float breathingAmplitude = 0.015f;
         [Tooltip("呼吸週期（秒、預設 4s = 成人正常呼吸節奏）")]
         public float breathingPeriod = 4.0f;
+        [Tooltip("加 ±5% 隨機微擾動（避免完美週期、像機器呼吸）")]
+        public bool breathingAddJitter = true;
 
         // 跑 blink / breathing / headSway 的 coroutine handle
         private Coroutine _blinkCoroutine;
@@ -848,15 +850,56 @@ namespace Siro
             yield return new WaitForSeconds(0.5f);
 
             Vector3 baseScale = transform.localScale;
-            float startTime = Time.time;
+            float cycleStart = Time.time;
+
+            // 每個週期隨機微擾動（避免完美週期、像機器）
+            float cycleJitter = 0f;
+            float nextJitterChange = 0f;
 
             while (true)
             {
-                float t = (Time.time - startTime) / breathingPeriod;
-                // sin 振盪：0.98 ~ 1.02
-                float scaleMultiplier = 1.0f + Mathf.Sin(t * 2f * Mathf.PI) * breathingAmplitude;
+                float elapsed = Time.time - cycleStart;
+                // 週期性 ±5% 隨機擾動（每 3-5 週期換一次、避免太頻繁）
+                if (elapsed > nextJitterChange)
+                {
+                    cycleJitter = UnityEngine.Random.Range(-0.05f, 0.05f) * breathingPeriod;
+                    nextJitterChange = elapsed + breathingPeriod * UnityEngine.Random.Range(3f, 5f);
+                }
+                float effectivePeriod = breathingPeriod + (breathingAddJitter ? cycleJitter : 0f);
+                float t = (elapsed % effectivePeriod) / effectivePeriod;  // [0, 1]
+
+                // 真實呼吸曲線（piecewise、不是對稱 sin）：
+                // 0.00 - 0.40: 吸氣（線性上升到 1.0+amp）
+                // 0.40 - 0.50: hold 滿
+                // 0.50 - 0.90: 吐氣（線性下降到 1.0-amp）
+                // 0.90 - 1.00: hold 底
+                // 吸氣快、吐氣慢（自然）
+                float breathValue;
+                if (t < 0.40f)
+                {
+                    // 吸氣：t=0 → 0、t=0.4 → 1
+                    float phase = t / 0.40f;
+                    breathValue = phase;  // 線性（也可以用 sqrt 加速）
+                }
+                else if (t < 0.50f)
+                {
+                    breathValue = 1f;  // hold 滿
+                }
+                else if (t < 0.90f)
+                {
+                    // 吐氣：t=0.5 → 1、t=0.9 → 0（比吸氣慢 2 倍）
+                    float phase = (t - 0.50f) / 0.40f;
+                    breathValue = 1f - phase;
+                }
+                else
+                {
+                    breathValue = 0f;  // hold 底
+                }
+
+                // 從 [0, 1] 映射到 [1-amp, 1+amp]、加 jitter 到週期長度（已加過）
+                float scaleMultiplier = 1.0f + (breathValue * 2f - 1f) * breathingAmplitude;
                 transform.localScale = baseScale * scaleMultiplier;
-                yield return null;  // 每 frame 更新、平滑呼吸
+                yield return null;  // 每 frame 更新
             }
         }
 
