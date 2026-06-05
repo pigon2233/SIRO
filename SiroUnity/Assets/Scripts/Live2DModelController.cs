@@ -84,9 +84,21 @@ namespace Siro
         [Tooltip("呼吸週期（秒、預設 4s = 成人正常呼吸節奏）")]
         public float breathingPeriod = 4.0f;
 
-        // 跑 blink / breathing 的 coroutine handle
+        // 跑 blink / breathing / headSway 的 coroutine handle
         private Coroutine _blinkCoroutine;
         private Coroutine _breathingCoroutine;
+        private Coroutine _headSwayCoroutine;
+
+        [Tooltip("啟用頭部微妙晃動 — 給 Mao 活的感覺（不是死的）\n" +
+                 "每 4-8s 隨機一次小角度 Y 軸旋轉、模擬「自然擺頭」。\n" +
+                 "預設 ±2 度、不影響點擊 hit area（Mao 是 2D Collider 不靠 rotation 命中）。")]
+        public bool enableHeadSway = true;
+        [Tooltip("頭部晃動最大角度（度）")]
+        public float headSwayAngle = 2.0f;
+        [Tooltip("頭部晃動最短間隔（秒）")]
+        public float headSwayMinInterval = 4.0f;
+        [Tooltip("頭部晃動最長間隔（秒）")]
+        public float headSwayMaxInterval = 8.0f;
         [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）\n\n" +
                  "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public int[] eyeDrawableIndices = new[] { 87, 92 };
@@ -253,6 +265,12 @@ namespace Siro
             if (enableBreathingFallback && (idleMotion == null || !autoPlayIdle))
             {
                 _breathingCoroutine = StartCoroutine(BreathingRoutine());
+            }
+
+            // v1.2+：頭部微妙晃動
+            if (enableHeadSway)
+            {
+                _headSwayCoroutine = StartCoroutine(HeadSwayRoutine());
             }
         }
 #else
@@ -589,11 +607,69 @@ namespace Siro
             }
         }
 
+        /// <summary>
+        /// 頭部微妙晃動 — 每 4-8s 隨機一個 Y 軸小角度、平滑 lerp 過去、停一下、再回 0
+        /// 給 Mao 活的感覺（不是塑膠模型）
+        /// 注意：rotation Y 是 3D 軸、對 Live2D 是「歪頭」效果（左/右）
+        /// </summary>
+        private System.Collections.IEnumerator HeadSwayRoutine()
+        {
+            // 等 Mao 出現
+            yield return new WaitForSeconds(1.0f);
+            float originalY = transform.eulerAngles.y;
+
+            while (true)
+            {
+                float wait = UnityEngine.Random.Range(headSwayMinInterval, headSwayMaxInterval);
+                yield return new WaitForSeconds(wait);
+
+                // 隨機目標角度（±headSwayAngle 度）
+                float targetAngle = UnityEngine.Random.Range(-headSwayAngle, headSwayAngle);
+                float duration = 0.6f;  // 0.6s 平滑搖過去
+                float elapsed = 0f;
+                float startAngle = transform.eulerAngles.y;
+                if (startAngle > 180f) startAngle -= 360f;  // 規範到 [-180, 180]
+
+                // lerp 過去
+                while (elapsed < duration)
+                {
+                    elapsed += Time.deltaTime;
+                    float t = Mathf.Clamp01(elapsed / duration);
+                    // smoothstep 平滑
+                    float smoothT = t * t * (3f - 2f * t);
+                    float currentAngle = Mathf.Lerp(startAngle, targetAngle, smoothT);
+                    Vector3 euler = transform.eulerAngles;
+                    euler.y = currentAngle;
+                    transform.eulerAngles = euler;
+                    yield return null;
+                }
+
+                // 停留 0.5-1.5s
+                float hold = UnityEngine.Random.Range(0.5f, 1.5f);
+                yield return new WaitForSeconds(hold);
+
+                // lerp 回 0
+                elapsed = 0f;
+                while (elapsed < duration)
+                {
+                    elapsed += Time.deltaTime;
+                    float t = Mathf.Clamp01(elapsed / duration);
+                    float smoothT = t * t * (3f - 2f * t);
+                    float currentAngle = Mathf.Lerp(targetAngle, originalY, smoothT);
+                    Vector3 euler = transform.eulerAngles;
+                    euler.y = currentAngle;
+                    transform.eulerAngles = euler;
+                    yield return null;
+                }
+            }
+        }
+
         private void OnDisable()
         {
             // 停止 coroutine、避免 OnDisable 後還在跑
             if (_blinkCoroutine != null) { StopCoroutine(_blinkCoroutine); _blinkCoroutine = null; }
             if (_breathingCoroutine != null) { StopCoroutine(_breathingCoroutine); _breathingCoroutine = null; }
+            if (_headSwayCoroutine != null) { StopCoroutine(_headSwayCoroutine); _headSwayCoroutine = null; }
         }
     }
 }
