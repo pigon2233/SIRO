@@ -238,12 +238,77 @@ async def lifespan(app: FastAPI):
     from .tasks import list_tasks as _list_tasks
     logger.info(f"  SendTask 已註冊 {len(_list_tasks())} 個 built-in：{_list_tasks()}")
 
+    # v1.2+：背景 warm-up LLM（讓第一個 user chat 不用等 cold start）
+    # 不 block lifespan — 丟背景 task 跑、bridge 立刻接受 request
+    # 第一次 LLM call 通常 5-8s（MiniMax cold connect + TTFT）、
+    # warm-up 跑完後 user 第一個 chat 只要 3-5s
+    # 環境變數 SIRO_LLM_WARMUP=false 可關
+    if os.environ.get("SIRO_LLM_WARMUP", "true").lower() == "true":
+        asyncio.create_task(_warmup_llm())
+
     yield
 
     # 關閉
     if state.agent_os:
         await state.agent_os.stop()
     logger.info("🛑 SIRO Bridge 關閉")
+
+
+# ==================== v1.2+ LLM warm-up helper ====================
+
+async def _warmup_llm() -> None:
+    """
+    bridge 啟動後背景 warm-up LLM — 讓第一個 user chat 不用等 cold start
+
+    流程：
+    1. sleep 2s（讓 bridge 開始接 request、不要擋 startup）
+    2. 用 hermes.chat("hi", "") 丟個小 prompt
+       → 第一次會 cold connect MiniMax API（5-8s）
+       → 連線 + TLS + 認證都建立好
+       → 結果丟掉（warm-up 不在意內容）
+    3. 如果 streaming client 也有、順便暖 SSE 連線
+
+    失敗沒關係、log warning、user 第一個 chat 還是有 cold start
+    （只是沒有 warm-up 加速、不是壞掉）
+    """
+    import time
+    await asyncio.sleep(2)
+    t0 = time.time()
+    logger.info("[warmup] 開始 LLM warm-up...")
+
+    # 1. hermes warm-up
+    if state.hermes and state.hermes.is_available():
+        try:
+            await asyncio.to_thread(
+                state.hermes.chat,
+                message="hi",
+                system_prompt="",
+            )
+            logger.info(
+                f"[warmup] hermes 連線暖好 ({int((time.time()-t0)*1000)}ms)"
+            )
+        except Exception as e:
+            logger.warning(f"[warmup] hermes warm-up 失敗（user 第一個 chat 還是 cold start）: {e}")
+    else:
+        logger.info("[warmup] hermes 不可用、跳過 hermes warm-up")
+
+    # 2. SSE streaming client warm-up（如果開啟的話）
+    if state.use_streaming and state.streaming_client.is_available:
+        try:
+            result = await state.streaming_client.chat_collect("hi", system_prompt="")
+            # MiniMaxStreamingResult 是 dataclass 不是 dict、用 .text
+            text_len = len(result.text) if hasattr(result, "text") else 0
+            logger.info(
+                f"[warmup] MiniMax SSE 連線暖好 ({int((time.time()-t0)*1000)}ms, "
+                f"回應 {text_len} 字)"
+            )
+        except Exception as e:
+            logger.warning(f"[warmup] SSE warm-up 失敗: {e}")
+
+    logger.info(
+        f"[warmup] 完成、總耗時 {int((time.time()-t0)*1000)}ms。"
+        f"user 第一個 chat 會比較快。"
+    )
 
 
 # ==================== v1.2 SendTask helper ====================
