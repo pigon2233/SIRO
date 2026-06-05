@@ -39,6 +39,7 @@ from .ollama_client import OllamaClient
 from .agent_os import AgentOS, Event  # v0.2+ 後台作業系統
 from .tasks import create_llm_reply_task  # v0.3 AgentOS 接 endpoint
 from .tasks import get_task, register_builtin_tasks  # v1.2 SendTask infra
+from .telegram_bot import TelegramBot, create_telegram_bot_from_env  # v1.0 Telegram 整合
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -127,6 +128,8 @@ class BridgeState:
         self.current_mood: dict = {}
         self.last_motion: list = []
         self.active_persona: str = "siro-default"
+        # v1.0+：Telegram bot（polling 模式、從 TELEGRAM_BOT_TOKEN env 啟動）
+        self.telegram_bot: Optional[TelegramBot] = None
 
 
 state = BridgeState()
@@ -246,9 +249,24 @@ async def lifespan(app: FastAPI):
     if os.environ.get("SIRO_LLM_WARMUP", "true").lower() == "true":
         asyncio.create_task(_warmup_llm())
 
+    # v1.0+：Telegram bot 整合（polling 模式）
+    # 沒設 TELEGRAM_BOT_TOKEN 就跳過
+    state.telegram_bot = create_telegram_bot_from_env(state)
+    if state.telegram_bot:
+        try:
+            await state.telegram_bot.start()
+            logger.info("  Telegram bot 已啟動、polling 開始")
+        except Exception as e:
+            logger.error(f"  Telegram bot 啟動失敗: {e}")
+            state.telegram_bot = None
+    else:
+        logger.info("  Telegram bot: 未設 TELEGRAM_BOT_TOKEN、跳過")
+
     yield
 
     # 關閉
+    if state.telegram_bot:
+        await state.telegram_bot.stop()
     if state.agent_os:
         await state.agent_os.stop()
     logger.info("🛑 SIRO Bridge 關閉")
