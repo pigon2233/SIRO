@@ -36,7 +36,10 @@ namespace Siro
 
         [Header("Idle Motion (v0.2 待機動作)")]
         [Tooltip("待機動作。Start() 自動 loop 播放。" +
-                 "Mao 預設拖入 mtn_01.anim（5.57s 呼吸 loop）。\n" +
+                 "Mao 預設拖入 mtn_01.anim（Unity AnimationClip 格式、5.57s 呼吸 loop）。\n" +
+                 "注意：是 .anim 檔（Unity AnimationClip）、不是 .fade 檔（Cubism fade motion）。" +
+                 "兩個不同、fade 檔是給 Cubism Motion Controller 用的、這欄位吃 anim。\n" +
+                 "沒設的話 enableBreathingFallback 會用 scale 模擬呼吸。\n" +
                  "v0.2+ 可由 persona YAML 的 idle_motions 覆寫（待 v1 擴充）。")]
         public AnimationClip idleMotion;
         [Tooltip("Start 自動播放 idle")]
@@ -89,12 +92,20 @@ namespace Siro
         private Coroutine _breathingCoroutine;
         private Coroutine _headSwayCoroutine;
 
+#if SIRO_HAS_CUBISM
+        // Cubism eye-blink 參數（runtime 抓、Hiyori/SD 角色都有）
+        // ParamEyeLOpen / ParamEyeROpen：1 = 開、0 = 閉
+        // 找不到時 fallback 到 SetEyeRenderersVisible hide-pupils
+        private Cubism.Core.CubismParameter _eyeLOpenParam;
+        private Cubism.Core.CubismParameter _eyeROpenParam;
+#endif
+
         [Tooltip("啟用頭部微妙晃動 — 給 Mao 活的感覺（不是死的）\n" +
                  "每 4-8s 隨機一次小角度 Y 軸旋轉、模擬「自然擺頭」。\n" +
                  "預設 ±2 度、不影響點擊 hit area（Mao 是 2D Collider 不靠 rotation 命中）。")]
         public bool enableHeadSway = true;
-        [Tooltip("頭部晃動最大角度（度）")]
-        public float headSwayAngle = 2.0f;
+        [Tooltip("頭部晃動最大角度（度）— v1.2 從 2 改 5（2 度 Live2D 平面幾乎看不到）")]
+        public float headSwayAngle = 5.0f;
         [Tooltip("頭部晃動最短間隔（秒）")]
         public float headSwayMinInterval = 4.0f;
         [Tooltip("頭部晃動最長間隔（秒）")]
@@ -250,9 +261,44 @@ namespace Siro
             }
 
             // v1.2+：自然隨機眨眼
-            if (enableBlinking && _eyeRenderers != null && _eyeRenderers.Length > 0)
+            // 優先用 Cubism 參數（ParamEyeLOpen/ROpen）動畫 — 真眨眼
+            // 找不到參數才掉 hide-pupils fallback
+#if SIRO_HAS_CUBISM
+            if (enableBlinking && _model != null)
             {
-                _blinkCoroutine = StartCoroutine(BlinkRoutine());
+                _eyeLOpenParam = _model.Parameters.FindById("ParamEyeLOpen");
+                _eyeROpenParam = _model.Parameters.FindById("ParamEyeROpen");
+                if (_eyeLOpenParam != null && _eyeROpenParam != null)
+                {
+                    if (verboseLogging) Debug.Log(
+                        "[Live2DModelController] 找到 Cubism eye-blink 參數、用參數動畫眨眼"
+                    );
+                }
+                else
+                {
+                    if (verboseLogging) Debug.LogWarning(
+                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen、掉 hide-pupils fallback。" +
+                        "如果要更自然眨眼、model 要有 eye-open 參數。"
+                    );
+                }
+            }
+#endif
+            if (enableBlinking)
+            {
+                bool hasCubismBlink =
+#if SIRO_HAS_CUBISM
+                    (_eyeLOpenParam != null && _eyeROpenParam != null);
+#else
+                    false;
+#endif
+                bool hasFallbackBlink = (_eyeRenderers != null && _eyeRenderers.Length > 0);
+                if (hasCubismBlink || hasFallbackBlink)
+                {
+                    _blinkCoroutine = StartCoroutine(BlinkRoutine());
+                    if (verboseLogging) Debug.Log(
+                        $"[Live2DModelController] 眨眼 coroutine 啟動 (Cubism={hasCubismBlink}, fallback={hasFallbackBlink})"
+                    );
+                }
             }
             else if (enableBlinking)
             {
@@ -271,6 +317,9 @@ namespace Siro
             if (enableHeadSway)
             {
                 _headSwayCoroutine = StartCoroutine(HeadSwayRoutine());
+                if (verboseLogging) Debug.Log(
+                    $"[Live2DModelController] 頭部晃動 coroutine 啟動 (angle=±{headSwayAngle}°, interval={headSwayMinInterval}-{headSwayMaxInterval}s)"
+                );
             }
         }
 #else
@@ -566,23 +615,73 @@ namespace Siro
                 float wait = UnityEngine.Random.Range(blinkMinInterval, blinkMaxInterval);
                 yield return new WaitForSeconds(wait);
 
-                // 閉眼
-                SetEyeRenderersVisible(false);
-                yield return new WaitForSeconds(blinkDuration);
-
-                // 開眼
-                SetEyeRenderersVisible(true);
-
-                // 30% 機率雙眨眼
-                if (UnityEngine.Random.value < 0.3f)
+                // 優先用 Cubism 參數（真眨眼、眼皮動）
+#if SIRO_HAS_CUBISM
+                if (_eyeLOpenParam != null && _eyeROpenParam != null)
                 {
-                    yield return new WaitForSeconds(0.08f);  // 兩次眨眼間短暫間隔
+                    // 1.0 → 0.0 平滑 close
+                    yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
+                                                from: 1.0f, to: 0.0f, duration: 0.05f);
+                    // 0.0 → 1.0 平滑 open
+                    yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
+                                                from: 0.0f, to: 1.0f, duration: 0.07f);
+                }
+                else
+#endif
+                {
+                    // fallback：藏瞳孔（v1.2 早期實作、不夠好但能用）
                     SetEyeRenderersVisible(false);
                     yield return new WaitForSeconds(blinkDuration);
                     SetEyeRenderersVisible(true);
                 }
+
+                // 30% 機率雙眨眼
+                if (UnityEngine.Random.value < 0.3f)
+                {
+                    yield return new WaitForSeconds(0.08f);
+#if SIRO_HAS_CUBISM
+                    if (_eyeLOpenParam != null && _eyeROpenParam != null)
+                    {
+                        yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
+                                                    from: 1.0f, to: 0.0f, duration: 0.05f);
+                        yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
+                                                    from: 0.0f, to: 1.0f, duration: 0.07f);
+                    }
+                    else
+#endif
+                    {
+                        SetEyeRenderersVisible(false);
+                        yield return new WaitForSeconds(blinkDuration);
+                        SetEyeRenderersVisible(true);
+                    }
+                }
             }
         }
+
+#if SIRO_HAS_CUBISM
+        /// <summary>
+        /// 把 Cubism eye-open 參數從 from 平滑 lerp 到 to
+        /// duration 秒、yield return null 讓 frame 推進
+        /// </summary>
+        private System.Collections.IEnumerator AnimateEyeParam(
+            Cubism.Core.CubismParameter left, Cubism.Core.CubismParameter right,
+            float from, float to, float duration)
+        {
+            if (left == null || right == null) yield break;
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float v = Mathf.Lerp(from, to, t);
+                left.Value = v;
+                right.Value = v;
+                yield return null;
+            }
+            left.Value = to;
+            right.Value = to;
+        }
+#endif
 
         /// <summary>
         /// scale-based 呼吸 fallback — 沒 mtn_01.anim 時的 backup
