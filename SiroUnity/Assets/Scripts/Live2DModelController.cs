@@ -75,8 +75,8 @@ namespace Siro
         public float blinkMinInterval = 3.0f;
         [Tooltip("眨眼最長間隔（秒）")]
         public float blinkMaxInterval = 7.0f;
-        [Tooltip("眨眼持續時間（秒）")]
-        public float blinkDuration = 0.12f;
+        [Tooltip("眨眼持續時間（秒）— 0.12 太短不易看到、v1.2 從 0.12 改 0.20 比較明顯")]
+        public float blinkDuration = 0.20f;
 
         [Tooltip("啟用 scale-based 呼吸（idleMotion 沒設時的 fallback）\n" +
                  "0.98 ↔ 1.02 緩慢振盪、4 秒一個週期、模擬呼吸。\n" +
@@ -728,7 +728,9 @@ namespace Siro
         /// <summary>
         /// 透過 reflection 設 Cubism eye-open 參數（不需要 SIRO_HAS_CUBISM）
         /// 用 .Value 屬性
+        /// 第一次 call 印 log 確認 reflection 成功
         /// </summary>
+        private bool _eyeParamSetterLogged = false;
         private void SetCubismEyeParam(UnityEngine.Object param, float value)
         {
             if (param == null) return;
@@ -736,6 +738,22 @@ namespace Siro
             if (prop != null && prop.CanWrite)
             {
                 prop.SetValue(param, value);
+                if (!_eyeParamSetterLogged && verboseLogging)
+                {
+                    Debug.Log(
+                        $"[Live2DModelController] eye 參數 setter 成功（reflection）、" +
+                        $"設 {param.GetType().Name} = {value}"
+                    );
+                    _eyeParamSetterLogged = true;
+                }
+            }
+            else if (!_eyeParamSetterLogged && verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[Live2DModelController] eye 參數 setter 失敗 — Value 屬性找不到或不可寫、" +
+                    "model 可能用 animator 鎖住參數"
+                );
+                _eyeParamSetterLogged = true;
             }
         }
 
@@ -744,6 +762,11 @@ namespace Siro
         /// Open 組：1.0 → 0.0（close）
         /// Close 組：0.0 → 1.0（同步 close、因為 Close 1.0 = 閉）
         /// 用 value 比例自動同步：closeValue = 1 - openValue
+        ///
+        /// 注意：如果 Mao 的 ParamEyeLOpen 設 0 不會閉眼皮（只藏瞳孔）、
+        /// 那是 model 設計問題、不是這段 code 問題
+        /// → 解法：在 model prefab 加 CubismEyeBlinkController component、
+        ///   它會自動偵測 eye-open 參數並處理
         /// </summary>
         private System.Collections.IEnumerator AnimateEyeParam(float from, float to, float duration)
         {
