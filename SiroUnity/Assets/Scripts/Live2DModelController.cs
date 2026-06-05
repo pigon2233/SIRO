@@ -93,11 +93,14 @@ namespace Siro
         private Coroutine _headSwayCoroutine;
 
         // v1.2+ 眨眼策略：
-        // - 優先 Cubism 參數 ParamEyeLOpen/ROpen（真眨眼、需 SIRO_HAS_CUBISM define + Cubism SDK）
-        // - fallback：SetEyeRenderersVisible hide-pupils（v1.2 早期實作、work but 不自然）
-        // 用 reflection 抓 Cubism.Core.CubismParameter 避免沒 SDK 時 compile 錯
+        // - 優先 Cubism 參數（用 reflection 抓、不用 SIRO_HAS_CUBISM）
+        //   * ParamEyeLOpen / ParamEyeROpen：1 = 開、0 = 閉（標準）
+        //   * ParamEyeLClose / ParamEyeRClose：0 = 開、1 = 閉（反向、有些 model 有）
+        // - fallback：SetEyeRenderersVisible hide-pupils
         private UnityEngine.Object _eyeLOpenParam;  // 實際是 Cubism.Core.CubismParameter
         private UnityEngine.Object _eyeROpenParam;
+        private UnityEngine.Object _eyeLCloseParam;  // 有的 model 才有
+        private UnityEngine.Object _eyeRCloseParam;
         private bool _hasCubismBlinkParam = false;
 
         [Tooltip("啟用頭部微妙晃動 — 給 Mao 活的感覺（不是死的）\n" +
@@ -629,8 +632,10 @@ namespace Siro
         }
 
         /// <summary>
-        /// 找 Cubism ParamEyeLOpen / ParamEyeROpen 參數（用 reflection、不需要 SIRO_HAS_CUBISM）
-        /// 設 _hasCubismBlinkParam flag 給 BlinkRoutine 用
+        /// 找 Cubism eye-blink 參數（用 reflection、不需要 SIRO_HAS_CUBISM）
+        /// 找四個：ParamEyeLOpen / ParamEyeROpen / ParamEyeLClose / ParamEyeRClose
+        /// 有的 model 兩組都有（Open + Close）、動畫要同步
+        /// 設 _hasCubismBlinkParam flag 給 BlinkRoutine 用（有任一組就 true）
         /// </summary>
         private void TryFindCubismEyeBlinkParams()
         {
@@ -649,19 +654,24 @@ namespace Siro
 
                 _eyeLOpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeLOpen" }) as UnityEngine.Object;
                 _eyeROpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeROpen" }) as UnityEngine.Object;
-                _hasCubismBlinkParam = (_eyeLOpenParam != null && _eyeROpenParam != null);
+                _eyeLCloseParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeLClose" }) as UnityEngine.Object;
+                _eyeRCloseParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeRClose" }) as UnityEngine.Object;
+
+                bool hasOpen = (_eyeLOpenParam != null && _eyeROpenParam != null);
+                bool hasClose = (_eyeLCloseParam != null && _eyeRCloseParam != null);
+                _hasCubismBlinkParam = (hasOpen || hasClose);
 
                 if (_hasCubismBlinkParam && verboseLogging)
                 {
                     Debug.Log(
-                        "[Live2DModelController] 找到 Cubism eye-blink 參數（用 reflection）、" +
-                        "會用參數動畫真眨眼"
+                        $"[Live2DModelController] 找到 Cubism eye-blink 參數（reflection）、" +
+                        $"Open={hasOpen}, Close={hasClose}、會動畫真眨眼"
                     );
                 }
                 else if (verboseLogging)
                 {
                     Debug.LogWarning(
-                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen（model 沒 eye-open 參數）、" +
+                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen/LClose/RClose、" +
                         "掉 hide-pupils fallback"
                     );
                 }
@@ -690,8 +700,10 @@ namespace Siro
         }
 
         /// <summary>
-        /// 把 eye-open 參數從 from 平滑 lerp 到 to
-        /// duration 秒、yield return null 讓 frame 推進
+        /// 動畫 eye-open 跟 eye-close 兩個方向的參數
+        /// Open 組：1.0 → 0.0（close）
+        /// Close 組：0.0 → 1.0（同步 close、因為 Close 1.0 = 閉）
+        /// 用 value 比例自動同步：closeValue = 1 - openValue
         /// </summary>
         private System.Collections.IEnumerator AnimateEyeParam(float from, float to, float duration)
         {
@@ -700,13 +712,21 @@ namespace Siro
             {
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
-                float v = Mathf.Lerp(from, to, t);
-                SetCubismEyeParam(_eyeLOpenParam, v);
-                SetCubismEyeParam(_eyeROpenParam, v);
+                float openValue = Mathf.Lerp(from, to, t);
+                float closeValue = 1.0f - openValue;
+                // Open 組（1=開 → 0=閉）
+                SetCubismEyeParam(_eyeLOpenParam, openValue);
+                SetCubismEyeParam(_eyeROpenParam, openValue);
+                // Close 組（0=開 → 1=閉、反向）
+                SetCubismEyeParam(_eyeLCloseParam, closeValue);
+                SetCubismEyeParam(_eyeRCloseParam, closeValue);
                 yield return null;
             }
+            // 收尾：Open 設 to、Close 設 1-to
             SetCubismEyeParam(_eyeLOpenParam, to);
             SetCubismEyeParam(_eyeROpenParam, to);
+            SetCubismEyeParam(_eyeLCloseParam, 1.0f - to);
+            SetCubismEyeParam(_eyeRCloseParam, 1.0f - to);
         }
 
         /// <summary>
