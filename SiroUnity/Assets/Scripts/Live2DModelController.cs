@@ -636,6 +636,9 @@ namespace Siro
         /// 找四個：ParamEyeLOpen / ParamEyeROpen / ParamEyeLClose / ParamEyeRClose
         /// 有的 model 兩組都有（Open + Close）、動畫要同步
         /// 設 _hasCubismBlinkParam flag 給 BlinkRoutine 用（有任一組就 true）
+        ///
+        /// SDK 5-r.5 的 CubismParameter[] 沒有 FindById method — 改用 IEnumerable
+        /// 逐個比對 .Id 屬性、找到就拿
         /// </summary>
         private void TryFindCubismEyeBlinkParams()
         {
@@ -645,35 +648,72 @@ namespace Siro
                 var modelType = _model.GetType();
                 var parametersProp = modelType.GetProperty("Parameters");
                 if (parametersProp == null) return;
-                var parameters = parametersProp.GetValue(_model);
-                if (parameters == null) return;
+                var parametersObj = parametersProp.GetValue(_model);
+                if (parametersObj == null) return;
 
-                // 呼叫 .FindById("ParamEyeLOpen") / FindById("ParamEyeROpen")
-                var findByIdMethod = parameters.GetType().GetMethod("FindById");
-                if (findByIdMethod == null) return;
+                // 把 parameters 當 IEnumerable 處理
+                // SDK 5-r.5：CubismParameterStore 實作 IEnumerable<CubismParameter>
+                var enumerable = parametersObj as System.Collections.IEnumerable;
+                if (enumerable == null)
+                {
+                    // 也許是 array 本身、直接 cast
+                    enumerable = parametersObj as System.Collections.IEnumerable;
+                    if (enumerable == null)
+                    {
+                        if (verboseLogging) Debug.LogWarning(
+                            "[Live2DModelController] parameters 不是 IEnumerable、無法列舉"
+                        );
+                        return;
+                    }
+                }
 
-                _eyeLOpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeLOpen" }) as UnityEngine.Object;
-                _eyeROpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeROpen" }) as UnityEngine.Object;
-                _eyeLCloseParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeLClose" }) as UnityEngine.Object;
-                _eyeRCloseParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeRClose" }) as UnityEngine.Object;
+                // 列出所有參數、log 給 debug（順便找 blink 參數）
+                var availableIds = new System.Collections.Generic.List<string>();
+                foreach (var p in enumerable)
+                {
+                    if (p == null) continue;
+                    var pType = p.GetType();
+                    var idProp = pType.GetProperty("Id");
+                    var nameProp = pType.GetProperty("Name");
+                    string id = idProp?.GetValue(p) as string;
+                    string name = nameProp?.GetValue(p) as string;
+                    if (!string.IsNullOrEmpty(id)) availableIds.Add(id);
+                    // 找目標參數（比對 Id 或 Name）
+                    if (id == "ParamEyeLOpen" || name == "ParamEyeLOpen")
+                        _eyeLOpenParam = p as UnityEngine.Object;
+                    else if (id == "ParamEyeROpen" || name == "ParamEyeROpen")
+                        _eyeROpenParam = p as UnityEngine.Object;
+                    else if (id == "ParamEyeLClose" || name == "ParamEyeLClose")
+                        _eyeLCloseParam = p as UnityEngine.Object;
+                    else if (id == "ParamEyeRClose" || name == "ParamEyeRClose")
+                        _eyeRCloseParam = p as UnityEngine.Object;
+                }
 
                 bool hasOpen = (_eyeLOpenParam != null && _eyeROpenParam != null);
                 bool hasClose = (_eyeLCloseParam != null && _eyeRCloseParam != null);
                 _hasCubismBlinkParam = (hasOpen || hasClose);
 
-                if (_hasCubismBlinkParam && verboseLogging)
+                if (verboseLogging)
                 {
+                    // 印所有找到的參數（給 debug 用）
+                    string allIds = string.Join(", ", availableIds);
                     Debug.Log(
-                        $"[Live2DModelController] 找到 Cubism eye-blink 參數（reflection）、" +
-                        $"Open={hasOpen}, Close={hasClose}、會動畫真眨眼"
+                        $"[Live2DModelController] model 有 {availableIds.Count} 個 Cubism 參數：" +
+                        $"{allIds}"
                     );
-                }
-                else if (verboseLogging)
-                {
-                    Debug.LogWarning(
-                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen/LClose/RClose、" +
-                        "掉 hide-pupils fallback"
-                    );
+                    if (_hasCubismBlinkParam)
+                    {
+                        Debug.Log(
+                            $"[Live2DModelController] 找到 eye-blink 參數、Open={hasOpen}, Close={hasClose}"
+                        );
+                    }
+                    else
+                    {
+                        Debug.LogWarning(
+                            "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen/LClose/RClose、" +
+                            "掉 hide-pupils fallback"
+                        );
+                    }
                 }
             }
             catch (Exception e)
