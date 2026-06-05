@@ -92,13 +92,13 @@ namespace Siro
         private Coroutine _breathingCoroutine;
         private Coroutine _headSwayCoroutine;
 
-#if SIRO_HAS_CUBISM
-        // Cubism eye-blink 參數（runtime 抓、Hiyori/SD 角色都有）
-        // ParamEyeLOpen / ParamEyeROpen：1 = 開、0 = 閉
-        // 找不到時 fallback 到 SetEyeRenderersVisible hide-pupils
-        private Cubism.Core.CubismParameter _eyeLOpenParam;
-        private Cubism.Core.CubismParameter _eyeROpenParam;
-#endif
+        // v1.2+ 眨眼策略：
+        // - 優先 Cubism 參數 ParamEyeLOpen/ROpen（真眨眼、需 SIRO_HAS_CUBISM define + Cubism SDK）
+        // - fallback：SetEyeRenderersVisible hide-pupils（v1.2 早期實作、work but 不自然）
+        // 用 reflection 抓 Cubism.Core.CubismParameter 避免沒 SDK 時 compile 錯
+        private UnityEngine.Object _eyeLOpenParam;  // 實際是 Cubism.Core.CubismParameter
+        private UnityEngine.Object _eyeROpenParam;
+        private bool _hasCubismBlinkParam = false;
 
         [Tooltip("啟用頭部微妙晃動 — 給 Mao 活的感覺（不是死的）\n" +
                  "每 4-8s 隨機一次小角度 Y 軸旋轉、模擬「自然擺頭」。\n" +
@@ -261,36 +261,16 @@ namespace Siro
             }
 
             // v1.2+：自然隨機眨眼
-            // 優先用 Cubism 參數（ParamEyeLOpen/ROpen）動畫 — 真眨眼
-            // 找不到參數才掉 hide-pupils fallback
-#if SIRO_HAS_CUBISM
+            // 用 reflection 找 Cubism ParamEyeLOpen/ROpen 參數（避免硬 SIRO_HAS_CUBISM 依賴）
+            // 有 → 用參數動畫眨眼（真眼皮動）
+            // 沒 → fallback hide-pupils
             if (enableBlinking && _model != null)
             {
-                _eyeLOpenParam = _model.Parameters.FindById("ParamEyeLOpen");
-                _eyeROpenParam = _model.Parameters.FindById("ParamEyeROpen");
-                if (_eyeLOpenParam != null && _eyeROpenParam != null)
-                {
-                    if (verboseLogging) Debug.Log(
-                        "[Live2DModelController] 找到 Cubism eye-blink 參數、用參數動畫眨眼"
-                    );
-                }
-                else
-                {
-                    if (verboseLogging) Debug.LogWarning(
-                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen、掉 hide-pupils fallback。" +
-                        "如果要更自然眨眼、model 要有 eye-open 參數。"
-                    );
-                }
+                TryFindCubismEyeBlinkParams();
             }
-#endif
             if (enableBlinking)
             {
-                bool hasCubismBlink =
-#if SIRO_HAS_CUBISM
-                    (_eyeLOpenParam != null && _eyeROpenParam != null);
-#else
-                    false;
-#endif
+                bool hasCubismBlink = _hasCubismBlinkParam;
                 bool hasFallbackBlink = (_eyeRenderers != null && _eyeRenderers.Length > 0);
                 if (hasCubismBlink || hasFallbackBlink)
                 {
@@ -615,21 +595,15 @@ namespace Siro
                 float wait = UnityEngine.Random.Range(blinkMinInterval, blinkMaxInterval);
                 yield return new WaitForSeconds(wait);
 
-                // 優先用 Cubism 參數（真眨眼、眼皮動）
-#if SIRO_HAS_CUBISM
-                if (_eyeLOpenParam != null && _eyeROpenParam != null)
+                if (_hasCubismBlinkParam)
                 {
-                    // 1.0 → 0.0 平滑 close
-                    yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
-                                                from: 1.0f, to: 0.0f, duration: 0.05f);
-                    // 0.0 → 1.0 平滑 open
-                    yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
-                                                from: 0.0f, to: 1.0f, duration: 0.07f);
+                    // 真眨眼（Cubism 參數 1.0 → 0.0 → 1.0）
+                    yield return AnimateEyeParam(1.0f, 0.0f, 0.05f);
+                    yield return AnimateEyeParam(0.0f, 1.0f, 0.07f);
                 }
                 else
-#endif
                 {
-                    // fallback：藏瞳孔（v1.2 早期實作、不夠好但能用）
+                    // fallback：藏瞳孔（v1.2 早期實作、work but 不自然）
                     SetEyeRenderersVisible(false);
                     yield return new WaitForSeconds(blinkDuration);
                     SetEyeRenderersVisible(true);
@@ -639,16 +613,12 @@ namespace Siro
                 if (UnityEngine.Random.value < 0.3f)
                 {
                     yield return new WaitForSeconds(0.08f);
-#if SIRO_HAS_CUBISM
-                    if (_eyeLOpenParam != null && _eyeROpenParam != null)
+                    if (_hasCubismBlinkParam)
                     {
-                        yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
-                                                    from: 1.0f, to: 0.0f, duration: 0.05f);
-                        yield return AnimateEyeParam(_eyeLOpenParam, _eyeROpenParam,
-                                                    from: 0.0f, to: 1.0f, duration: 0.07f);
+                        yield return AnimateEyeParam(1.0f, 0.0f, 0.05f);
+                        yield return AnimateEyeParam(0.0f, 1.0f, 0.07f);
                     }
                     else
-#endif
                     {
                         SetEyeRenderersVisible(false);
                         yield return new WaitForSeconds(blinkDuration);
@@ -658,30 +628,86 @@ namespace Siro
             }
         }
 
-#if SIRO_HAS_CUBISM
         /// <summary>
-        /// 把 Cubism eye-open 參數從 from 平滑 lerp 到 to
+        /// 找 Cubism ParamEyeLOpen / ParamEyeROpen 參數（用 reflection、不需要 SIRO_HAS_CUBISM）
+        /// 設 _hasCubismBlinkParam flag 給 BlinkRoutine 用
+        /// </summary>
+        private void TryFindCubismEyeBlinkParams()
+        {
+            try
+            {
+                // _model 是 CubismModel、透過 reflection 拿 .Parameters
+                var modelType = _model.GetType();
+                var parametersProp = modelType.GetProperty("Parameters");
+                if (parametersProp == null) return;
+                var parameters = parametersProp.GetValue(_model);
+                if (parameters == null) return;
+
+                // 呼叫 .FindById("ParamEyeLOpen") / FindById("ParamEyeROpen")
+                var findByIdMethod = parameters.GetType().GetMethod("FindById");
+                if (findByIdMethod == null) return;
+
+                _eyeLOpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeLOpen" }) as UnityEngine.Object;
+                _eyeROpenParam = findByIdMethod.Invoke(parameters, new object[] { "ParamEyeROpen" }) as UnityEngine.Object;
+                _hasCubismBlinkParam = (_eyeLOpenParam != null && _eyeROpenParam != null);
+
+                if (_hasCubismBlinkParam && verboseLogging)
+                {
+                    Debug.Log(
+                        "[Live2DModelController] 找到 Cubism eye-blink 參數（用 reflection）、" +
+                        "會用參數動畫真眨眼"
+                    );
+                }
+                else if (verboseLogging)
+                {
+                    Debug.LogWarning(
+                        "[Live2DModelController] 找不到 ParamEyeLOpen/ROpen（model 沒 eye-open 參數）、" +
+                        "掉 hide-pupils fallback"
+                    );
+                }
+            }
+            catch (Exception e)
+            {
+                if (verboseLogging) Debug.LogWarning(
+                    $"[Live2DModelController] 找 Cubism 參數失敗（可能沒裝 SDK）: {e.Message}"
+                );
+                _hasCubismBlinkParam = false;
+            }
+        }
+
+        /// <summary>
+        /// 透過 reflection 設 Cubism eye-open 參數（不需要 SIRO_HAS_CUBISM）
+        /// 用 .Value 屬性
+        /// </summary>
+        private void SetCubismEyeParam(UnityEngine.Object param, float value)
+        {
+            if (param == null) return;
+            var prop = param.GetType().GetProperty("Value");
+            if (prop != null && prop.CanWrite)
+            {
+                prop.SetValue(param, value);
+            }
+        }
+
+        /// <summary>
+        /// 把 eye-open 參數從 from 平滑 lerp 到 to
         /// duration 秒、yield return null 讓 frame 推進
         /// </summary>
-        private System.Collections.IEnumerator AnimateEyeParam(
-            Cubism.Core.CubismParameter left, Cubism.Core.CubismParameter right,
-            float from, float to, float duration)
+        private System.Collections.IEnumerator AnimateEyeParam(float from, float to, float duration)
         {
-            if (left == null || right == null) yield break;
             float elapsed = 0f;
             while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
                 float v = Mathf.Lerp(from, to, t);
-                left.Value = v;
-                right.Value = v;
+                SetCubismEyeParam(_eyeLOpenParam, v);
+                SetCubismEyeParam(_eyeROpenParam, v);
                 yield return null;
             }
-            left.Value = to;
-            right.Value = to;
+            SetCubismEyeParam(_eyeLOpenParam, to);
+            SetCubismEyeParam(_eyeROpenParam, to);
         }
-#endif
 
         /// <summary>
         /// scale-based 呼吸 fallback — 沒 mtn_01.anim 時的 backup
