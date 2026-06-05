@@ -257,10 +257,6 @@ namespace Siro
                     );
                 }
             }
-                {
-                    Debug.Log("[Live2DModelController] CubismMotionController 是 null（預期行為：motion 停用）");
-                }
-            }
 
             // Cubism Drawable 在 Awake 之後才完全 ready，所以 cache 放這
             CacheEyeRenderers();
