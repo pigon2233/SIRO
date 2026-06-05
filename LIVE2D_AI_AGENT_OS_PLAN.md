@@ -500,13 +500,13 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 **v0.x 進度子表**（v0.2 → v0.4+ 都屬 Phase 2，**v1.0+ 見「v1+ Roadmap」段**）：
 
 
-| 子版本     | 狀態 | 重點                                                                      | 對應 commit                             |
-| ---------- | ---- | ------------------------------------------------------------------------- | --------------------------------------- |
-| **v0.2**   | ✅   | AgentOS 骨架（Task Queue + Event Bus + Worker Pool）                      | `f56c4e2`                               |
-| **v0.3**   | ✅   | /chat /ws opt-in 走 AgentOS、Task.id、EventBus unsubscribe、wait_for_task | `73b78b8` `6698fa6` `da28d9f` `02c7381` |
-| **v0.3.1** | ✅   | SSE streaming 基礎建設（MiniMaxStreamingClient + /ws 推 delta）           | `99de74c` `d96351b`                     |
-| **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試 | `c1a3dc5`                              |
-| **v0.4+**  | ✅   | Unity 端 incremental render（接 /ws 的 delta 訊息，**提前於 v1+ 規劃做**— 詳見 STRATEGIC_NOTES.md Q2）| `0dd9da7`                              |
+| 子版本     | 狀態 | 重點                                                                                                                             | 對應 commit                             |
+| ---------- | ---- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| **v0.2**   | ✅   | AgentOS 骨架（Task Queue + Event Bus + Worker Pool）                                                                             | `f56c4e2`                               |
+| **v0.3**   | ✅   | /chat /ws opt-in 走 AgentOS、Task.id、EventBus unsubscribe、wait_for_task                                                        | `73b78b8` `6698fa6` `da28d9f` `02c7381` |
+| **v0.3.1** | ✅   | SSE streaming 基礎建設（MiniMaxStreamingClient + /ws 推 delta）                                                                  | `99de74c` `d96351b`                     |
+| **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試                                        | `c1a3dc5`                               |
+| **v0.4+**  | ✅   | Unity 端 incremental render（接 /ws 的 delta 訊息，**提前於 v1+ 規劃做**— 詳見 STRATEGIC_NOTES.md Q2）                          | `0dd9da7`                               |
 | **v1.2**   | ✅   | SendTask + OnClick：bridge 5 個 built-in task + registry + WS handler + Unity SendTaskAsync + OnMaoClicked + PersonaClickHandler | `7f2d4f7` `91b5dec` `5fc448d` `0a2ab7d` |
 
 **交付物**（混合：v0.3 完成的 + 仍待做的）：
@@ -527,15 +527,17 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  Loading 狀態視覺 — `ChatInputUI` disable input + 動畫「思考中.」dots（commit 24ab90a）
 - [X]  截圖功能 — `ScreenshotCapture` MonoBehaviour、RenderTexture 存 PNG、F12 熱鍵（commit 4e3fe78）
 - [X]  響應時間優化 — Ollama fallback timeout 15s→3s（commit 9e205dc）
+- [X]  LLM warm-up — bridge lifespan 背景暖 MiniMax SSE 連線（commit 10f6cba，SIRO_LLM_WARMUP=true 預設）
+- [X]  **v1.0 Telegram 整合** — `bridge/telegram_bot.py` polling 模式 + 13 個測試（commit 20164a8，TELEGRAM_BOT_TOKEN 環境變數啟動）
 
 **驗收條件**（對應 KPI）：
 
 - [X]  改 `i18n/zh-TW.json` UI 不用改 code 就變中文（zh-TW 預設、`en-US.json` 留 v1+）
 - [X]  **K10**: bridge tests 覆蓋率 ≥ 80%（✅ 188+2 = 190 tests pass、v0.3 期間多次擴充）
-- [ ]  角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）— 待機動作 ✅、呼吸/眨眼 ⏸ 暫停
+- [ ]  角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）— 待機動作 ✅、呼吸/眨眼
 - [ ]  **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）— 工具可量、視覺未動
-- [ ]  表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫（⏸ 暫停）
-- [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）（⏸ 暫停）
+- [ ]  表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫
+- [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）
 - [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
 **預估時間**：Phase 2 剩 v1.5+ LLM tool calling、v2.0 持久化
@@ -1014,11 +1016,12 @@ v0.4 採 STRATEGIC_NOTES Q2 結論（**不繞過 hermes** 但 proxy 限制 → �
 
 **目前架構**（2 條 LLM 呼叫路徑，**不抽 protocol 抽象**）：
 
-| Client | 用途 | 啟用方式 |
-|---|---|---|
-| `bridge/hermes_client.py` | subprocess 走 hermes CLI（sync） | 預設路徑 |
-| `bridge/minimax_streaming_client.py` | 直打 Anthropic SSE（streaming） | opt-in `SIRO_STREAMING=true` |
-| `bridge/ollama_client.py` | 本地 Ollama fallback | hermes timeout 時自動切 |
+
+| Client                               | 用途                             | 啟用方式                    |
+| ------------------------------------ | -------------------------------- | --------------------------- |
+| `bridge/hermes_client.py`            | subprocess 走 hermes CLI（sync） | 預設路徑                    |
+| `bridge/minimax_streaming_client.py` | 直打 Anthropic SSE（streaming）  | opt-in`SIRO_STREAMING=true` |
+| `bridge/ollama_client.py`            | 本地 Ollama fallback             | hermes timeout 時自動切     |
 
 **v1+ 加新 provider 時的策略**（per STRATEGIC_NOTES Q2）：
 
@@ -1053,13 +1056,14 @@ Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**�
 
 各 sub-version 簡述：
 
-| Sub-version | 場景 | 預估時程 | 對應 KPI / GAPS |
-|---|---|---|---|
-| **v1.0** | Telegram 整合（`bridge/telegram_bot.py`） | 3-5 天 | GAPS #5（災難恢復的遠端介入） |
-| **v1.1** | 排程/cron（`bridge/scheduler.py`） | 2-3 天 | — |
-| **v1.2** | Unity 點 Live2D → task（SendTask + OnClick） | 3 天（**規格見 AGENT_OS.md**） | — |
-| **v1.5** | LLM tool calling（Mao 主動召喚任務） | 1-2 週 | GAPS #2（多模態的 tool use） |
-| **v2.0** | **任務持久化 + bridge 重啟可恢復 + multi-process 部署就緒** | 2-3 週 | **K9（5歲到80歲會用）正式開始驗證**、GAPS #4（離線）、#5（災難恢復）|
+
+| Sub-version | 場景                                                        | 預估時程                       | 對應 KPI / GAPS                                                      |
+| ----------- | ----------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------- |
+| **v1.0**    | Telegram 整合（`bridge/telegram_bot.py` polling 模式 + 13 個測試）| ✅ 完成 | GAPS #5（災難恢復的遠端介入）                                        |
+| **v1.1**    | 排程/cron（`bridge/scheduler.py`）                          | 2-3 天                         | —                                                                   |
+| **v1.2**    | Unity 點 Live2D → task（SendTask + OnClick）               | 3 天（**規格見 AGENT_OS.md**） | —                                                                   |
+| **v1.5**    | LLM tool calling（Mao 主動召喚任務）                        | 1-2 週                         | GAPS #2（多模態的 tool use）                                         |
+| **v2.0**    | **任務持久化 + bridge 重啟可恢復 + multi-process 部署就緒** | 2-3 週                         | **K9（5歲到80歲會用）正式開始驗證**、GAPS #4（離線）、#5（災難恢復） |
 
 **v2.0 重點**（補上 [AGENT_OS.md v1+ Roadmap](docs/AGENT_OS.md) 漏段）：
 
@@ -1195,12 +1199,13 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 ### 11.3 觀察指標
 
-| 指標 | 定義 | v0.x 目標 | v1.x 目標 | v2 目標 |
-|---|---|---|---|---|
-| **啟用率** | 收到後 7 天內還會用 | 100%（自己） | ≥ 50% | ≥ 70% |
-| **留存** | 第 30 天還會用 | 100% | ≥ 30% | ≥ 50% |
-| **失敗模式** | 卡多久就放棄 | < 5 分鐘 | < 10 分鐘 | < 5 分鐘 |
-| **真實需求** | 跟「以為需要」的落差 | 自己回頭比對 | 親友訪談 | 量化問卷 |
+
+| 指標         | 定義                 | v0.x 目標    | v1.x 目標 | v2 目標  |
+| ------------ | -------------------- | ------------ | --------- | -------- |
+| **啟用率**   | 收到後 7 天內還會用  | 100%（自己） | ≥ 50%    | ≥ 70%   |
+| **留存**     | 第 30 天還會用       | 100%         | ≥ 30%    | ≥ 50%   |
+| **失敗模式** | 卡多久就放棄         | < 5 分鐘     | < 10 分鐘 | < 5 分鐘 |
+| **真實需求** | 跟「以為需要」的落差 | 自己回頭比對 | 親友訪談  | 量化問卷 |
 
 ### 11.4 每次 user test 問的問題
 
@@ -1212,12 +1217,13 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 ### 11.5 對應的 K9 KPI 啟動時程
 
-| 階段 | 動作 |
-|---|---|
-| **v0.x**（現在） | 開發者自己 + 1-2 親友的 user diary 累積 |
-| **v1.0**（Telegram 整合）| 找 1 位「不會用 AI 的人」試用 Telegram bot 1 週 |
-| **v1.5**（LLM tool calling）| 觀察：Mao 主動召喚任務對非工程師是「驚喜」還是「嚇到」|
-| **v2.0** | 正式啟動 K9 驗證（user testing 量化問卷 + 5 歲到 80 歲年齡分層測試）|
+
+| 階段                         | 動作                                                                 |
+| ---------------------------- | -------------------------------------------------------------------- |
+| **v0.x**（現在）             | 開發者自己 + 1-2 親友的 user diary 累積                              |
+| **v1.0**（Telegram 整合）    | 找 1 位「不會用 AI 的人」試用 Telegram bot 1 週                      |
+| **v1.5**（LLM tool calling） | 觀察：Mao 主動召喚任務對非工程師是「驚喜」還是「嚇到」               |
+| **v2.0**                     | 正式啟動 K9 驗證（user testing 量化問卷 + 5 歲到 80 歲年齡分層測試） |
 
 **重要**：開發者假設永遠錯。**唯一驗證方式：看別人用。**
 
@@ -1238,14 +1244,15 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 ## 12. 變更紀錄
 
 
-| 日期       | 版本   | 變更                                                                                                                                |
-| ---------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增 `docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling |
+| 日期       | 版本   | 變更                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-06 | v3.6   | v1.0 Telegram 整合完成（commit 20164a8）：`bridge/telegram_bot.py` polling 模式 + 13 個測試；TELEGRAM_BOT_TOKEN 環境變數啟動；BridgeState 整合 + lifespan 自動 start/stop。LLM warm-up (10f6cba) 補進交付物。v1+ Roadmap v1.0 row 改 ✅。Phase 2 4 視覺 + v1.0 Telegram 都收尾、剩 v1.1 排程 + v1.5+ LLM tool calling + v2.0 持久化 |
+| 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增`docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling                                                                                      |
 | 2026-06-05 | v3.4   | 合併 PLAN_REVISION_v2.1 + PLAN_REVIEW_v0.3 部分修訂：(1) v1+ Roadmap 加 v2.0（任務持久化、bridge 重啟可恢復、multi-process 部署就緒，K9 KPI 正式啟動驗證）— 補 AGENT_OS.md 漏段；(2) 加 §1.4 範圍邊界（v1 不做清單 14 項 + 只做清單）；(3) 加 §8.5 LLM 廠商風險管理（2 client 並行 + 不抽 protocol 抽象的決策依據）；(4) 加 §11 使用者驗證（user diary SOP + K9 啟動時程）；(5) v1+ Roadmap 表加「對應 KPI / GAPS」欄 |
-| 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端 `SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅ |
-| 2026-06-04 | v3.2   | v1+ Roadmap 段：加 SendTask + OnClick 完整規格（WS message 格式、C# API、task 種類、驗收條件、實作順序）放 AGENT_OS.md、PLAN.md 引用 |
-| 2026-06-04 | v3.1   | v0.4 翻預設：`SIRO_USE_AGENT_OS` 預設從 false 改 true（逃生 `=false`）、v0.x 子表 v0.4 ✅、視覺設定檔 v0.3 ✅、test count 190 → 198 |
-| 2026-06-04 | v3.0   | 對齊 v0.3 實況：Phase 0 改 ✅ 完成、Phase 2 改 🟡 進行中（v0.3.1）、Phase 2 加 v0.x 進度子表、test count 78 → 190、加 cross-ref 段 |
-| 2026-06-04 | v2.0.x | v0.3 期間的細部修訂（PLAN_REVIEW_v0.3、PLAN_REVISION_v2.1）— 見`docs/PLAN_REVIEW_v0.3.md`                                          |
-| 2026-06-02 | v2.0   | 砍掉重寫。加入 Rust OS 層、4 層架構、6 個 Phase、完整文件清單、AI 協作指南                                                          |
-| 2026-06-02 | v1.0   | 初版（過度樂觀，文件描述願景而非現實）                                                                                              |
+| 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端`SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅                                                                                                                                            |
+| 2026-06-04 | v3.2   | v1+ Roadmap 段：加 SendTask + OnClick 完整規格（WS message 格式、C# API、task 種類、驗收條件、實作順序）放 AGENT_OS.md、PLAN.md 引用                                                                                                                                                                                                                                                                                      |
+| 2026-06-04 | v3.1   | v0.4 翻預設：`SIRO_USE_AGENT_OS` 預設從 false 改 true（逃生 `=false`）、v0.x 子表 v0.4 ✅、視覺設定檔 v0.3 ✅、test count 190 → 198                                                                                                                                                                                                                                                                                      |
+| 2026-06-04 | v3.0   | 對齊 v0.3 實況：Phase 0 改 ✅ 完成、Phase 2 改 🟡 進行中（v0.3.1）、Phase 2 加 v0.x 進度子表、test count 78 → 190、加 cross-ref 段                                                                                                                                                                                                                                                                                       |
+| 2026-06-04 | v2.0.x | v0.3 期間的細部修訂（PLAN_REVIEW_v0.3、PLAN_REVISION_v2.1）— 見`docs/PLAN_REVIEW_v0.3.md`                                                                                                                                                                                                                                                                                                                                |
+| 2026-06-02 | v2.0   | 砍掉重寫。加入 Rust OS 層、4 層架構、6 個 Phase、完整文件清單、AI 協作指南                                                                                                                                                                                                                                                                                                                                                |
+| 2026-06-02 | v1.0   | 初版（過度樂觀，文件描述願景而非現實）                                                                                                                                                                                                                                                                                                                                                                                    |
