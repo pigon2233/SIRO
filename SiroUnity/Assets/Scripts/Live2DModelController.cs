@@ -78,11 +78,12 @@ namespace Siro
         [Tooltip("單次眨眼總時間（秒）— 0.20 是成人正常眨眼節奏")]
         public float blinkDuration = 0.20f;
 
-        [Tooltip("啟用 scale-based 呼吸（idleMotion 沒設時的 fallback）\n" +
-                 "模擬真實呼吸曲線（吸氣快、hold、吐氣慢）、不是對稱 sin。\n" +
-                 "有 mtn_01.anim（呼吸動畫）時可關、避免雙重呼吸。")]
-        public bool enableBreathingFallback = true;
-        [Tooltip("呼吸振幅（0.015 = ±1.5%、預設比之前小、自然）")]
+        [Tooltip("啟用 scale-based 呼吸 fallback（idleMotion 沒設時用）\n" +
+                 "v1.2+ 預設 false：Mao 預設有 mtn_01.anim 設在 idleMotion、走動畫路徑。\n" +
+                 "如果 mtn_01 沒設或壞掉、可以勾 true 用 scale 模擬呼吸。\n" +
+                 "模擬真實呼吸曲線（吸氣快、hold、吐氣慢）。")]
+        public bool enableBreathingFallback = false;
+        [Tooltip("呼吸振幅（0.015 = ±1.5%、自然）")]
         public float breathingAmplitude = 0.015f;
         [Tooltip("呼吸週期（秒、預設 4s = 成人正常呼吸節奏）")]
         public float breathingPeriod = 4.0f;
