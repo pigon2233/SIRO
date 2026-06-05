@@ -67,7 +67,7 @@ namespace Siro
         public float blendLockDuration = 0.4f;
 
         [Header("v1.2+ 自然行為（呼吸 / 眨眼）")]
-        [Tooltip("啟用自然隨機眨眼 — 每 3-7s 一次、短暫關眼 0.1-0.2s。\n" +
+        [Tooltip("啟用自然隨機眨眼 — 每 3-7s 一次、短暫關眼 0.2s。\n" +
                  "30% 機率雙眨眼（自然、人類也會不慎連眨）。\n" +
                  "Mao 沒設定呼吸 mtn_01 時、這個更重要。")]
         public bool enableBlinking = true;
@@ -75,7 +75,7 @@ namespace Siro
         public float blinkMinInterval = 3.0f;
         [Tooltip("眨眼最長間隔（秒）")]
         public float blinkMaxInterval = 7.0f;
-        [Tooltip("眨眼持續時間（秒）— 0.12 太短不易看到、v1.2 從 0.12 改 0.20 比較明顯")]
+        [Tooltip("單次眨眼總時間（秒）— 0.20 是成人正常眨眼節奏")]
         public float blinkDuration = 0.20f;
 
         [Tooltip("啟用 scale-based 呼吸（idleMotion 沒設時的 fallback）\n" +
@@ -121,6 +121,9 @@ namespace Siro
         private CubismModel _model;
         private CubismExpressionController _expressionController;
         private CubismMotionController _motionController;
+        // v1.2+：Unity Animation fallback（沒 CubismMotionController 但有 Animation component）
+        // 給 PlayMotion() 用、播 mtn_01.anim 等純動畫
+        private Animation _unityAnimation;
         private MeshRenderer[] _eyeRenderers;  // 預存的眼球 MeshRenderer（依 eyeDrawableIndices）
 #endif
 
@@ -479,45 +482,65 @@ namespace Siro
         /// <param name="priority">Cubism priority，預設 Normal (=2)。Idle 設 IdlePriority (=1) 容易被 tap 打斷。</param>
         public void PlayMotion(AnimationClip clip, bool isLoop = true, float fadeInSeconds = 1.0f, int priority = 2)
         {
-#if SIRO_HAS_CUBISM
-            if (_motionController == null)
-            {
-                if (verboseLogging) Debug.LogWarning("[Live2DModelController] 無 motion controller，無法播 motion");
-                return;
-            }
-
             if (clip == null)
             {
                 if (verboseLogging) Debug.Log("[Live2DModelController] PlayMotion(null) — 忽略（沒指定 clip）");
                 return;
             }
 
-            try
+            // 路徑 1: CubismMotionController（標準、優先）
+#if SIRO_HAS_CUBISM
+            if (_motionController != null)
             {
-                // Cubism 5 SDK 5-r.5 API
-                _motionController.PlayAnimation(
-                    clip,
-                    layerIndex: 0,
-                    priority: priority,
-                    isLoop: isLoop,
-                    speed: 1.0f
-                );
-                if (verboseLogging) Debug.Log(
-                    $"[Live2DModelController] PlayMotion: {clip.name} (loop={isLoop}, fade={fadeInSeconds}s)"
-                );
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[Live2DModelController] PlayMotion 失敗: {e.Message}");
-            }
-#else
-            if (verboseLogging)
-            {
-                Debug.LogWarning(
-                    $"[Live2DModelController] PlayMotion({clip.name}) 被忽略，SIRO_HAS_CUBISM 未啟用"
-                );
+                try
+                {
+                    _motionController.PlayAnimation(
+                        clip,
+                        layerIndex: 0,
+                        priority: priority,
+                        isLoop: isLoop,
+                        speed: 1.0f
+                    );
+                    if (verboseLogging) Debug.Log(
+                        $"[Live2DModelController] PlayMotion: {clip.name} (Cubism, loop={isLoop})"
+                    );
+                    return;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[Live2DModelController] Cubism PlayMotion 失敗: {e.Message}");
+                }
             }
 #endif
+
+            // 路徑 2: Unity Animation component（v1.2+ 替代方案）
+            // Mao 沒 CubismMotionController 但有 UnityEngine.Animation 時用
+            // 不需要 Animator、比 Cubism 簡單、適合 mtn_01.anim 這種純動畫 clip
+            if (_unityAnimation == null)
+            {
+                _unityAnimation = GetComponent<Animation>();
+            }
+            if (_unityAnimation != null)
+            {
+                // 把 clip 加進 Animation（如果還沒）、設為預設 clip、播
+                if (_unityAnimation.GetClip(clip.name) == null)
+                {
+                    _unityAnimation.AddClip(clip, clip.name);
+                }
+                _unityAnimation.clip = clip;
+                _unityAnimation.wrapMode = isLoop ? WrapMode.Loop : WrapMode.Once;
+                _unityAnimation.Play();
+                if (verboseLogging) Debug.Log(
+                    $"[Live2DModelController] PlayMotion: {clip.name} (Unity Animation fallback, loop={isLoop})"
+                );
+                return;
+            }
+
+            // 兩者都沒 → log + 提示 user
+            Debug.LogWarning(
+                "[Live2DModelController] 無 CubismMotionController 也無 Unity Animation component、" +
+                "anim 檔無法套用。建議 Mao prefab 加 Animation 或 CubismMotionController component。"
+            );
         }
 
         /// <summary>
@@ -600,13 +623,26 @@ namespace Siro
 
                 if (_hasCubismBlinkParam)
                 {
-                    // 真眨眼（Cubism 參數 1.0 → 0.0 → 1.0）
-                    yield return AnimateEyeParam(1.0f, 0.0f, 0.05f);
-                    yield return AnimateEyeParam(0.0f, 1.0f, 0.07f);
+                    // 真眨眼：Cubism 參數 snap 0 + 順便藏瞳孔
+                    // 不 lerp（慢動作會很奇怪）、用 snap 直接 1.0 → 0.0
+                    SetCubismEyeParam(_eyeLOpenParam, 0f);
+                    SetCubismEyeParam(_eyeROpenParam, 0f);
+                    SetCubismEyeParam(_eyeLCloseParam, 1f);
+                    SetCubismEyeParam(_eyeRCloseParam, 1f);
+                    SetEyeRenderersVisible(false);  // 雙保險：瞳孔也藏
+                    yield return new WaitForSeconds(blinkDuration * 0.4f);  // hold closed (短)
+
+                    // 開眼：snap 回 1.0
+                    SetCubismEyeParam(_eyeLOpenParam, 1f);
+                    SetCubismEyeParam(_eyeROpenParam, 1f);
+                    SetCubismEyeParam(_eyeLCloseParam, 0f);
+                    SetCubismEyeParam(_eyeRCloseParam, 0f);
+                    SetEyeRenderersVisible(true);
+                    yield return new WaitForSeconds(blinkDuration * 0.6f);  // open 期間
                 }
                 else
                 {
-                    // fallback：藏瞳孔（v1.2 早期實作、work but 不自然）
+                    // fallback：藏瞳孔
                     SetEyeRenderersVisible(false);
                     yield return new WaitForSeconds(blinkDuration);
                     SetEyeRenderersVisible(true);
@@ -618,8 +654,17 @@ namespace Siro
                     yield return new WaitForSeconds(0.08f);
                     if (_hasCubismBlinkParam)
                     {
-                        yield return AnimateEyeParam(1.0f, 0.0f, 0.05f);
-                        yield return AnimateEyeParam(0.0f, 1.0f, 0.07f);
+                        SetCubismEyeParam(_eyeLOpenParam, 0f);
+                        SetCubismEyeParam(_eyeROpenParam, 0f);
+                        SetCubismEyeParam(_eyeLCloseParam, 1f);
+                        SetCubismEyeParam(_eyeRCloseParam, 1f);
+                        SetEyeRenderersVisible(false);
+                        yield return new WaitForSeconds(blinkDuration * 0.4f);
+                        SetCubismEyeParam(_eyeLOpenParam, 1f);
+                        SetCubismEyeParam(_eyeROpenParam, 1f);
+                        SetCubismEyeParam(_eyeLCloseParam, 0f);
+                        SetCubismEyeParam(_eyeRCloseParam, 0f);
+                        SetEyeRenderersVisible(true);
                     }
                     else
                     {
@@ -788,40 +833,9 @@ namespace Siro
             }
         }
 
-        /// <summary>
-        /// 動畫 eye-open 跟 eye-close 兩個方向的參數
-        /// Open 組：1.0 → 0.0（close）
-        /// Close 組：0.0 → 1.0（同步 close、因為 Close 1.0 = 閉）
-        /// 用 value 比例自動同步：closeValue = 1 - openValue
-        ///
-        /// 注意：如果 Mao 的 ParamEyeLOpen 設 0 不會閉眼皮（只藏瞳孔）、
-        /// 那是 model 設計問題、不是這段 code 問題
-        /// → 解法：在 model prefab 加 CubismEyeBlinkController component、
-        ///   它會自動偵測 eye-open 參數並處理
-        /// </summary>
-        private System.Collections.IEnumerator AnimateEyeParam(float from, float to, float duration)
-        {
-            float elapsed = 0f;
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(elapsed / duration);
-                float openValue = Mathf.Lerp(from, to, t);
-                float closeValue = 1.0f - openValue;
-                // Open 組（1=開 → 0=閉）
-                SetCubismEyeParam(_eyeLOpenParam, openValue);
-                SetCubismEyeParam(_eyeROpenParam, openValue);
-                // Close 組（0=開 → 1=閉、反向）
-                SetCubismEyeParam(_eyeLCloseParam, closeValue);
-                SetCubismEyeParam(_eyeRCloseParam, closeValue);
-                yield return null;
-            }
-            // 收尾：Open 設 to、Close 設 1-to
-            SetCubismEyeParam(_eyeLOpenParam, to);
-            SetCubismEyeParam(_eyeROpenParam, to);
-            SetCubismEyeParam(_eyeLCloseParam, 1.0f - to);
-            SetCubismEyeParam(_eyeRCloseParam, 1.0f - to);
-        }
+        // v1.2+ AnimateEyeParam 已經改成 snap 模式、不需要 lerp 版本
+        // BlinkRoutine 直接呼叫 SetCubismEyeParam 設 snap 0/1
+        // 留這段註解避免下次又撿回來用
 
         /// <summary>
         /// scale-based 呼吸 fallback — 沒 mtn_01.anim 時的 backup
