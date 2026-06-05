@@ -727,31 +727,62 @@ namespace Siro
 
         /// <summary>
         /// 透過 reflection 設 Cubism eye-open 參數（不需要 SIRO_HAS_CUBISM）
-        /// 用 .Value 屬性
+        /// 同時試 property (.Value) 跟 field (.Value)、SDK 版本不同可能用不同方式
         /// 第一次 call 印 log 確認 reflection 成功
         /// </summary>
         private bool _eyeParamSetterLogged = false;
         private void SetCubismEyeParam(UnityEngine.Object param, float value)
         {
             if (param == null) return;
-            var prop = param.GetType().GetProperty("Value");
+            var paramType = param.GetType();
+
+            // 1. 試 property
+            var prop = paramType.GetProperty("Value");
             if (prop != null && prop.CanWrite)
             {
                 prop.SetValue(param, value);
                 if (!_eyeParamSetterLogged && verboseLogging)
                 {
                     Debug.Log(
-                        $"[Live2DModelController] eye 參數 setter 成功（reflection）、" +
-                        $"設 {param.GetType().Name} = {value}"
+                        $"[Live2DModelController] eye 參數 setter 成功（property reflection）、" +
+                        $"設 {paramType.Name} = {value}"
                     );
                     _eyeParamSetterLogged = true;
                 }
+                return;
             }
-            else if (!_eyeParamSetterLogged && verboseLogging)
+
+            // 2. 試 field（SDK 某些版本用 public field 不是 property）
+            var field = paramType.GetField("Value",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (field != null)
             {
+                field.SetValue(param, value);
+                if (!_eyeParamSetterLogged && verboseLogging)
+                {
+                    Debug.Log(
+                        $"[Live2DModelController] eye 參數 setter 成功（field reflection）、" +
+                        $"設 {paramType.Name} = {value}"
+                    );
+                    _eyeParamSetterLogged = true;
+                }
+                return;
+            }
+
+            // 3. 都失敗 → log 印所有可寫的 property 跟 field（debug）
+            if (!_eyeParamSetterLogged && verboseLogging)
+            {
+                var props = paramType.GetProperties();
+                var propsStr = string.Join(", ",
+                    System.Array.ConvertAll(props, p => $"{p.Name}({(p.CanWrite ? "rw" : "r")})"));
+                var fields = paramType.GetFields(
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var fieldsStr = string.Join(", ",
+                    System.Array.ConvertAll(fields, f => $"{f.Name}"));
                 Debug.LogWarning(
-                    $"[Live2DModelController] eye 參數 setter 失敗 — Value 屬性找不到或不可寫、" +
-                    "model 可能用 animator 鎖住參數"
+                    $"[Live2DModelController] eye 參數 setter 失敗 — 找不到 Value 屬性或欄位。" +
+                    $"\n  找到的 properties: [{propsStr}]" +
+                    $"\n  找到的 fields: [{fieldsStr}]"
                 );
                 _eyeParamSetterLogged = true;
             }
