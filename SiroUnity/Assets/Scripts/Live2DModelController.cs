@@ -62,6 +62,31 @@ namespace Siro
                  "0 = 立即切換（不鎖、給快速 debug 用）。\n" +
                  "0.3-0.5s = 預設、視覺上不閃爍。")]
         public float blendLockDuration = 0.4f;
+
+        [Header("v1.2+ 自然行為（呼吸 / 眨眼）")]
+        [Tooltip("啟用自然隨機眨眼 — 每 3-7s 一次、短暫關眼 0.1-0.2s。\n" +
+                 "30% 機率雙眨眼（自然、人類也會不慎連眨）。\n" +
+                 "Mao 沒設定呼吸 mtn_01 時、這個更重要。")]
+        public bool enableBlinking = true;
+        [Tooltip("眨眼最短間隔（秒）")]
+        public float blinkMinInterval = 3.0f;
+        [Tooltip("眨眼最長間隔（秒）")]
+        public float blinkMaxInterval = 7.0f;
+        [Tooltip("眨眼持續時間（秒）")]
+        public float blinkDuration = 0.12f;
+
+        [Tooltip("啟用 scale-based 呼吸（idleMotion 沒設時的 fallback）\n" +
+                 "0.98 ↔ 1.02 緩慢振盪、4 秒一個週期、模擬呼吸。\n" +
+                 "有 mtn_01.anim（呼吸動畫）時可關、避免雙重呼吸。")]
+        public bool enableBreathingFallback = true;
+        [Tooltip("呼吸振幅（0.02 = ±2%、預設）")]
+        public float breathingAmplitude = 0.02f;
+        [Tooltip("呼吸週期（秒、預設 4s = 成人正常呼吸節奏）")]
+        public float breathingPeriod = 4.0f;
+
+        // 跑 blink / breathing 的 coroutine handle
+        private Coroutine _blinkCoroutine;
+        private Coroutine _breathingCoroutine;
         [Tooltip("眼球 Drawable 的 index（Mao 預設 [87, 92]，用 Tools/SIRO/Drawable Inspector 找出）\n\n" +
                  "v0.2+：可由 PersonaManager.SetQuirks() 在 persona 切換時 runtime 覆寫。")]
         public int[] eyeDrawableIndices = new[] { 87, 92 };
@@ -201,6 +226,33 @@ namespace Siro
             if (autoPlayIdle && idleMotion != null)
             {
                 PlayMotion(idleMotion, isLoop: true, fadeInSeconds: 1.0f);
+            }
+            else if (autoPlayIdle && idleMotion == null && enableBreathingFallback)
+            {
+                // 沒設 mtn_01 但啟用 breathing fallback → 用 scale 模擬呼吸
+                // log 提示 user 設 mtn_01 有更高品質
+                if (verboseLogging) Debug.Log(
+                    "[Live2DModelController] idleMotion 沒設、啟用 scale-based 呼吸 fallback。" +
+                    "如果要更高品質、拖 mtn_01.anim 到 idleMotion slot。"
+                );
+            }
+
+            // v1.2+：自然隨機眨眼
+            if (enableBlinking && _eyeRenderers != null && _eyeRenderers.Length > 0)
+            {
+                _blinkCoroutine = StartCoroutine(BlinkRoutine());
+            }
+            else if (enableBlinking)
+            {
+                if (verboseLogging) Debug.Log(
+                    "[Live2DModelController] enableBlinking=true 但 eyeDrawableIndices 沒配好、跳過眨眼"
+                );
+            }
+
+            // v1.2+：scale-based 呼吸 fallback（idleMotion 沒設或關 autoPlayIdle 時）
+            if (enableBreathingFallback && (idleMotion == null || !autoPlayIdle))
+            {
+                _breathingCoroutine = StartCoroutine(BreathingRoutine());
             }
         }
 #else
@@ -477,5 +529,71 @@ namespace Siro
             }
         }
 #endif
+
+        // ==================== v1.2+ 自然行為：眨眼 + 呼吸 ====================
+
+        /// <summary>
+        /// 自然隨機眨眼迴圈 — 每 3-7s 一次、短暫關眼 0.12s
+        /// 30% 機率雙眨眼（自然、人類也會不慎連眨）
+        /// 注意：眨眼時 _currentExpressionId 必須不是 hide_eye_on 的表情
+        ///       否則 SetEyeRenderersVisible 已經 false、我們再 false 沒差
+        /// </summary>
+        private System.Collections.IEnumerator BlinkRoutine()
+        {
+            // 等一下讓 Mao 先出現（避免一啟動就閉眼怪怪的）
+            yield return new WaitForSeconds(1.5f);
+
+            while (true)
+            {
+                float wait = UnityEngine.Random.Range(blinkMinInterval, blinkMaxInterval);
+                yield return new WaitForSeconds(wait);
+
+                // 閉眼
+                SetEyeRenderersVisible(false);
+                yield return new WaitForSeconds(blinkDuration);
+
+                // 開眼
+                SetEyeRenderersVisible(true);
+
+                // 30% 機率雙眨眼
+                if (UnityEngine.Random.value < 0.3f)
+                {
+                    yield return new WaitForSeconds(0.08f);  // 兩次眨眼間短暫間隔
+                    SetEyeRenderersVisible(false);
+                    yield return new WaitForSeconds(blinkDuration);
+                    SetEyeRenderersVisible(true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// scale-based 呼吸 fallback — 沒 mtn_01.anim 時的 backup
+        /// 緩慢振盪 transform.localScale.y、模擬呼吸節奏
+        /// 有 mtn_01.anim 時這個 coroutine 不啟動（避免雙重呼吸）
+        /// </summary>
+        private System.Collections.IEnumerator BreathingRoutine()
+        {
+            // 等 idle setup 結束
+            yield return new WaitForSeconds(0.5f);
+
+            Vector3 baseScale = transform.localScale;
+            float startTime = Time.time;
+
+            while (true)
+            {
+                float t = (Time.time - startTime) / breathingPeriod;
+                // sin 振盪：0.98 ~ 1.02
+                float scaleMultiplier = 1.0f + Mathf.Sin(t * 2f * Mathf.PI) * breathingAmplitude;
+                transform.localScale = baseScale * scaleMultiplier;
+                yield return null;  // 每 frame 更新、平滑呼吸
+            }
+        }
+
+        private void OnDisable()
+        {
+            // 停止 coroutine、避免 OnDisable 後還在跑
+            if (_blinkCoroutine != null) { StopCoroutine(_blinkCoroutine); _blinkCoroutine = null; }
+            if (_breathingCoroutine != null) { StopCoroutine(_breathingCoroutine); _breathingCoroutine = null; }
+        }
     }
 }
