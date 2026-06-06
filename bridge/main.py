@@ -114,6 +114,11 @@ class BridgeState:
         # MiniMax SSE client（跟 hermes 共用 env vars）
         from .minimax_streaming_client import MiniMaxStreamingClient
         self.streaming_client = MiniMaxStreamingClient()
+        # v1.5+：tool calling 路徑
+        # true → /ws chat 走 chat_stream_with_tools、LLM 用 native tool_use 選 emotion
+        # false → 走原本 regex parse [emotion:xxx] 文字
+        # 注意：tool calling 路徑會自動啟用（前提是 use_streaming 也是 true）
+        self.use_tool_calling = os.environ.get("SIRO_USE_TOOL_CALLING", "true").lower() == "true"
         # v0.2+：sessions_lock 保護多 thread / 多 request 並行讀寫
         # 雖然單 process + asyncio 已經序列化大部分 access，但
         # 1. tasks 在 worker thread pool（to_thread）執行
@@ -234,6 +239,9 @@ async def lifespan(app: FastAPI):
         logger.info(
             f"  MiniMaxStreamingClient is_available: {state.streaming_client.is_available}"
         )
+    logger.info(
+        f"  /ws LLM tool calling: {state.use_tool_calling}（v1.5+、SIRO_USE_TOOL_CALLING=false 可降回 regex parse）"
+    )
 
     # v1.2+：註冊 SendTask 內建 task handlers
     # mood.set / motion.play / persona.switch / chat.say / chat.summon
@@ -928,6 +936,123 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
     #   - Unity 端目前收到 delta 不 render（v1+ 才接 incremental render）
     #   - 預設 false — 既有測試不動
     t0 = time.time()
+    # v1.5+ LLM tool calling 路徑（tool_use API 選 emotion）
+    # 跟下面 streaming 流程幾乎一樣、只是用 chat_stream_with_tools 帶 tools 參數、
+    # 解析 tool_use event 直接拿 emotion（不用 regex parse [emotion:xxx] 文字）
+    if (
+        state.use_tool_calling
+        and state.use_streaming
+        and state.streaming_client.is_available
+    ):
+        from .tasks.llm_reply_task import create_llm_reply_with_tools_task
+        from .tools import get_available_tools
+
+        stream_history = state.sessions.get(session_id, [])
+        stream_history_context = ""
+        if stream_history:
+            stream_history_context = "\n\n最近的對話：\n" + "\n".join(
+                f"使用者: {h['user']}\n你: {h['agent']}" for h in stream_history[-5:]
+            )
+        stream_prompt = f"{stream_history_context}\n\n使用者: {message}" if stream_history_context else message
+        stream_system = get_personality(personality)
+
+        logger.info(f"⏱ [ws] 走 MiniMax-M3 SSE streaming + tool calling (v1.5+)")
+        t_stream_start = time.time()
+        delta_count = 0
+        full_text_parts: list[str] = []
+        ttft_ms: Optional[int] = None
+        tool_use_event = None  # v1.5+ LLM 選 tool 的事件
+        try:
+            async for event in state.streaming_client.chat_stream_with_tools(
+                message=stream_prompt,
+                system_prompt=stream_system,
+                tools=get_available_tools(),
+            ):
+                if event.type == "text":
+                    if ttft_ms is None:
+                        ttft_ms = int((time.time() - t_stream_start) * 1000)
+                        logger.info(f"⚡ [ws] TTFT={ttft_ms}ms")
+                    delta_count += 1
+                    full_text_parts.append(event.text)
+                    # 推 delta 給 Unity
+                    await websocket.send_json({
+                        "type": "delta",
+                        "text": event.text,
+                    })
+                elif event.type == "tool_use":
+                    # v1.5+ LLM 選 tool（v1.5 一次只一個、記第一個）
+                    if tool_use_event is None:
+                        tool_use_event = event
+                        logger.info(
+                            f"⏱ [ws] LLM 選 tool: {event.name} input={event.input}"
+                        )
+        except Exception as e:
+            logger.error(f"[ws] tool calling streaming 失敗: {e}")
+            fallback = await _make_fallback_response(
+                user_id=user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=personality,
+                error_detail=f"tool calling error: {e}",
+                user_message=message,
+            )
+            await websocket.send_json({
+                "type": "response",
+                "text": fallback.text,
+                "emotion": fallback.emotion.value,
+                "intensity": fallback.intensity,
+                "live2d": fallback.live2d.model_dump(),
+                "session_id": fallback.session_id,
+            })
+            return
+
+        full_text = "".join(full_text_parts)
+        t_stream_total = int((time.time() - t_stream_start) * 1000)
+        logger.info(
+            f"💬 [ws-tool-calling] user={message[:40]!r} → llm={full_text[:80]!r} "
+            f"[⚡ TTFT={ttft_ms}ms total={t_stream_total}ms deltas={delta_count} tool_used={tool_use_event is not None}]"
+        )
+
+        # 解析情緒：tool_use 優先、否則 regex parse
+        if tool_use_event and tool_use_event.name == "set_mood":
+            emotion_str = tool_use_event.input.get("emotion", "neutral")
+            intensity = float(tool_use_event.input.get("intensity", 0.7))
+            logger.info(f"⏱ [ws] tool_use 選 emotion={emotion_str} intensity={intensity}")
+        else:
+            # Fallback：regex parse [emotion:xxx] 文字
+            clean_text, emotion, intensity = parser.parse(full_text, user_input=message)
+            emotion_str = emotion.value
+            logger.info(f"⏱ [ws] 沒 tool_use、fallback regex: emotion={emotion_str}")
+
+        try:
+            live2d_signal = parser.to_live2d_signal(Emotion(emotion_str), intensity)
+        except Exception:
+            live2d_signal = parser.to_live2d_signal(Emotion("neutral"), 0.5)
+            emotion_str = "neutral"
+            intensity = 0.5
+
+        # 寫歷史
+        with state.sessions_lock:
+            if session_id not in state.sessions:
+                state.sessions[session_id] = []
+            state.sessions[session_id].append({
+                "user": message,
+                "agent": full_text,
+                "emotion": emotion_str,
+            })
+            state.sessions[session_id] = state.sessions[session_id][-20:]
+
+        # 推 final response
+        await websocket.send_json({
+            "type": "response",
+            "text": full_text,
+            "emotion": emotion_str,
+            "intensity": intensity,
+            "live2d": live2d_signal.model_dump(),
+            "session_id": session_id,
+        })
+        return
+
     if state.use_streaming and state.streaming_client.is_available:
         # 自己建 prompt + system（跟 v0.2 sync 路徑同樣邏輯）
         stream_history = state.sessions.get(session_id, [])

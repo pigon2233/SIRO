@@ -39,6 +39,43 @@ class MiniMaxStreamingResult:
     ttft_ms: Optional[int] = None          # Time To First Token（第一個 chunk 從送出到收到）
 
 
+@dataclass
+class StreamEvent:
+    """v1.5+ SSE event 結構化封裝
+
+    chat_stream 原本只 yield text chunks。v1.5+ tool calling 引入後、
+    LLM 回的 SSE 事件類型變多、要 yield 結構化 event 給 caller 處理。
+
+    事件型別：
+    - "text": 文字 chunk
+    - "tool_use": LLM 想 invoke 一個 tool（Anthropic API 的 tool_use block）
+    - "message_stop": 對話結束
+    - "error": API 錯誤
+    """
+    type: str
+    text: str = ""
+    id: str = ""
+    name: str = ""
+    input: dict = field(default_factory=dict)
+    message: str = ""
+
+    @classmethod
+    def text_event(cls, text):
+        return cls(type="text", text=text)
+
+    @classmethod
+    def tool_use_event(cls, id, name, input):
+        return cls(type="tool_use", id=id, name=name, input=input)
+
+    @classmethod
+    def stop_event(cls):
+        return cls(type="message_stop")
+
+    @classmethod
+    def error_event(cls, message):
+        return cls(type="error", message=message)
+
+
 class MiniMaxStreamingClient:
     """MiniMax-M3 (anthropic-compatible) SSE streaming client
 
@@ -232,3 +269,154 @@ class MiniMaxStreamingClient:
                 duration_ms=duration_ms,
                 ttft_ms=ttft_ms,
             )
+
+    # ================================================================
+    # v1.5+ Tool Calling 路徑
+    # ================================================================
+
+    # 為了避免改既有 chat_stream 簽名破壞 caller、新增 chat_stream_with_tools
+    # caller 想要 text-only 走 chat_stream、想要 tool 走 chat_stream_with_tools
+
+    async def chat_stream_with_tools(
+        self,
+        message: str,
+        system_prompt=None,
+        max_tokens: int = 1024,
+        tools: list = None,
+    ):
+        """v1.5+ LLM tool calling 的 streaming 版本
+
+        跟 chat_stream 差別：
+        - 多接 tools 參數（Anthropic tool_use 格式 list）
+        - Yield StreamEvent 而非純 text chunk
+        - 多解析 content_block_start + content_block_delta(input_json_delta) + content_block_stop 事件
+        """
+        if not self.is_available:
+            raise RuntimeError(
+                "MiniMaxStreamingClient 設定不齊："
+                f"base_url={bool(self.base_url)} model={bool(self.model)} api_key={bool(self.api_key)}"
+            )
+
+        messages = [{"role": "user", "content": message}]
+
+        body = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "messages": messages,
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+        if tools:
+            body["tools"] = tools
+
+        url = f"{self.base_url}/v1/messages"
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "accept": "text/event-stream",
+        }
+
+        start = time.time()
+        ttft = None
+        pending_tool_use = None  # {id, name, input_json}
+
+        logger.debug(f"[stream-tools] POST {url} (model={self.model}, tools={len(tools) if tools else 0})")
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as response:
+                    if response.status_code != 200:
+                        err_body = await response.aread()
+                        err_text = err_body.decode("utf-8", errors="replace")[:500]
+                        raise RuntimeError(
+                            f"MiniMax-M3 API error {response.status_code}: {err_text}"
+                        )
+
+                    event_type = None
+                    async for line in response.aiter_lines():
+                        if not line:
+                            event_type = None
+                            continue
+
+                        if line.startswith("event:"):
+                            event_type = line[len("event:"):].strip()
+                            continue
+
+                        if line.startswith("data:"):
+                            data_str = line[len("data:"):].strip()
+                            if data_str == "[DONE]":
+                                return
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                logger.warning(f"SSE 收到非 JSON data: {data_str[:100]}")
+                                continue
+
+                            # content_block_start - LLM 開始一個 text 或 tool_use block
+                            if event_type == "content_block_start":
+                                block = data.get("content_block", {})
+                                if block.get("type") == "tool_use":
+                                    pending_tool_use = {
+                                        "id": block.get("id", ""),
+                                        "name": block.get("name", ""),
+                                        "input_json": "",
+                                    }
+
+                            # content_block_delta - 累積 text / tool_use input
+                            elif event_type == "content_block_delta":
+                                delta = data.get("delta", {})
+                                delta_type = delta.get("type")
+                                if delta_type == "text_delta":
+                                    text_chunk = delta.get("text", "")
+                                    if text_chunk:
+                                        if ttft is None:
+                                            ttft = time.time() - start
+                                            logger.debug(
+                                                f"[stream-tools] TTFT={ttft*1000:.0f}ms（首個 chunk）"
+                                            )
+                                        yield StreamEvent.text_event(text_chunk)
+                                elif delta_type == "input_json_delta" and pending_tool_use is not None:
+                                    pending_tool_use["input_json"] += delta.get("partial_json", "")
+
+                            # content_block_stop - tool_use 結束、解析累積的 JSON
+                            elif event_type == "content_block_stop":
+                                if pending_tool_use is not None:
+                                    try:
+                                        input_dict = json.loads(pending_tool_use["input_json"]) if pending_tool_use["input_json"] else {}
+                                    except json.JSONDecodeError as e:
+                                        logger.warning(
+                                            f"[stream-tools] tool_use input JSON 解析失敗: {e}"
+                                        )
+                                        input_dict = {}
+                                    yield StreamEvent.tool_use_event(
+                                        id=pending_tool_use["id"],
+                                        name=pending_tool_use["name"],
+                                        input=input_dict,
+                                    )
+                                    pending_tool_use = None
+
+                            # message_start / message_delta - debug 用
+                            elif event_type == "message_start":
+                                model = data.get("message", {}).get("model", "")
+                                if model:
+                                    logger.debug(f"[stream-tools] message_start model={model}")
+                            elif event_type == "message_delta":
+                                stop_reason = data.get("delta", {}).get("stop_reason")
+                                if stop_reason:
+                                    logger.debug(f"[stream-tools] stop_reason={stop_reason}")
+
+                            # message_stop = 結束
+                            if event_type == "message_stop":
+                                return
+
+                            # error event
+                            if event_type == "error":
+                                err_msg = data.get("error", {}).get("message", "unknown")
+                                raise RuntimeError(f"MiniMax-M3 SSE error: {err_msg}")
+
+        except httpx.TimeoutException as e:
+            raise RuntimeError(f"MiniMax-M3 streaming timeout ({self.timeout}s): {e}")
+        except httpx.RequestError as e:
+            raise RuntimeError(f"MiniMax-M3 streaming request error: {e}")
