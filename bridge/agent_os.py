@@ -200,13 +200,74 @@ class AgentOS:
     # ==================== Enqueue / Workers ====================
 
     def enqueue(self, task: Task) -> None:
-        """丟任務到 queue（同步介面，FastAPI endpoint 內可直接呼叫）"""
+        """丟任務到 queue（同步介面，FastAPI endpoint 內可直接呼叫）
+
+        適合：需要 LLM 的慢任務（chat、persona 切換帶情緒分析等）
+        排隊：FIFO、可能被前面的 LLM task 阻塞
+        """
         if self._stopped:
             logger.warning(f"[AgentOS] 已停止，拒收 task {task.name}")
             return
         logger.debug(f"[AgentOS] enqueue {task.name} (queue size: {self.task_queue.qsize()})")
         # put_nowait 因為 queue 是無限大的（asyncio.Queue() 預設無上限）
         self.task_queue.put_nowait(task)
+
+    def enqueue_fast(self, task: Task) -> asyncio.Task:
+        """跳過 queue、直接 spawn background coroutine 跑 task
+
+        v1.2+ 給 SendTask（Unity 端點擊 Mao）用：
+        - mood.set / motion.play / persona.switch / chat.say / chat.summon
+          都不需要 LLM、< 100ms 就跑完
+        - 走 queue 會被前面的 LLM task 拖到 100s+、點 Mao 沒反應
+        - 走 fast lane 跟 LLM task 平行、立即執行
+
+        行為：
+        1. asyncio.create_task 立即 spawn（不排隊）
+        2. 跑完自動 emit task.completed / task.failed event（跟 enqueue 一致）
+        3. 失敗也不 raise、跟 worker 一樣繼續
+        4. 回傳 asyncio.Task 讓 caller 可以 await 或 cancel
+
+        注意：fast lane 沒有持久化 / 沒有 crash recovery
+        （LIFO queue 才有 task_done() 機制保證）— 不適合慢任務。
+        適合：< 1s 的即時互動任務。
+        """
+        if self._stopped:
+            logger.warning(f"[AgentOS] 已停止，拒收 fast task {task.name}")
+            # 已停止時 spawn 一個 no-op task 避免 caller crash
+            return asyncio.create_task(asyncio.sleep(0))
+
+        logger.debug(f"[AgentOS] enqueue_fast {task.name} (bypass queue, parallel)")
+
+        async def _run_fast():
+            """跟 _execute_task 一樣、但走 create_task 不走 queue"""
+            duration_ms = (time.time() - task.created_at) * 1000
+            t0 = time.time()
+            try:
+                result = await task.run()
+                run_ms = (time.time() - t0) * 1000
+                logger.info(
+                    f"[AgentOS] fast {task.name}[id={task.id}] 完成 "
+                    f"(queue 等待 {duration_ms:.0f}ms, 跑 {run_ms:.0f}ms)"
+                )
+                await self.event_bus.emit(Event(
+                    type="task.completed",
+                    data={"task": task.name, "task_id": task.id, "result": result, "duration_ms": run_ms},
+                    source="fast-lane",
+                ))
+                return result
+            except Exception as e:
+                run_ms = (time.time() - t0) * 1000
+                logger.exception(
+                    f"[AgentOS] fast {task.name}[id={task.id}] 失敗 ({run_ms:.0f}ms): {e}"
+                )
+                await self.event_bus.emit(Event(
+                    type="task.failed",
+                    data={"task": task.name, "task_id": task.id, "error": str(e), "traceback": traceback.format_exc()},
+                    source="fast-lane",
+                ))
+                # 不 raise — 跟 worker 一樣
+
+        return asyncio.create_task(_run_fast())
 
     async def _worker_loop(self, worker_id: int):
         """單一 worker 的主迴圈"""

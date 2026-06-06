@@ -13,9 +13,25 @@
 // v1.2 MVP：persona YAML 的 clickable_areas 是手寫靜態（PersonaConfig 暴露
 // 到 inspector）。v1.5+ 可改成 runtime 從 PersonaApiClient 拉最新 persona。
 //
+// v1.2+ 點擊限流：debounce (minClickIntervalSec) + in-flight 上限 (maxInFlightTasks)
+//   防止狂點讓後端 TaskQueue 堆積。queue 是 FIFO + 單 worker（bridge/agent_os.py），
+//   chat 慢的時候 click 會跟著等、響應會被拖到 100s+。
+//
 // 使用：
 //   - 掛在一個空 GameObject 上（跟 Live2DModelController + HermesBridgeClient 同層）
 //   - Inspector 設 live2DController、bridge、personaConfig references
+//
+// ==== TODO(v1.5+): 後端 TaskQueue 重構 ====
+//   目前後端 asyncio.Queue 是 FIFO + 單 worker，導致：
+//   1. chat 慢的時候 click 也跟著等
+//   2. 狂點會把 queue 灌爆（log 看到 task_in_queue=100s+）
+//   改法（見 bridge/agent_os.py）：
+//   A) 多 worker（asyncio.gather 平行處理）
+//   B) 任務分類：llm_reply vs motion/mood 即時任務走不同 queue
+//   C) 優先級：click/motion 高優先、chat 低優先
+//   D) Drop policy：queue 滿了丟舊的（保留最新意圖）
+//   Unity 端這層 (debounce + maxInFlight) 只是 client-side 治標、真正治本在後端。
+// =========================================
 //
 
 using System;
@@ -53,6 +69,14 @@ namespace Siro
 支援 string / int / float / bool、推斷規則：true/false → bool、能 int 解析 → int、能 float 解析 → float、其餘 → string")]
         public List<string> args = new List<string>();
 
+        [Tooltip(@"v1.2+ per-area timeout（秒）—
+預設 5s 配 HermesBridgeClient.SendTaskAsync 預設值。
+會觸發 LLM 的 task（chat.say、persona.switch、mood.set 帶情緒分析等）建議調 15-30s。
+即時任務（motion.play、expression.set）3-5s 夠。
+注意：timeout 太短會在 chat 響應期間誤判失敗（後端排隊中）；
+太長會卡 UI、debug 時等更久。")]
+        public float taskTimeoutSec = 5.0f;
+
         /// <summary>
         /// 從 args 字串 list 解析成 JObject
         /// 推斷規則：true/false → bool、整數 → int、浮點 → float、其餘 → string
@@ -71,7 +95,7 @@ namespace Siro
                 if (sep < 0)
                 {
                     Debug.LogWarning(
-                        $"[ClickableArea] 跳過格式錯誤的 arg {line!r}（要 'key: value' 或 'key=value'）"
+                        $"[ClickableArea] 跳過格式錯誤的 arg {line!}（要 'key: value' 或 'key=value'）"
                     );
                     continue;
                 }
@@ -125,9 +149,32 @@ namespace Siro
         [Header("Debug")]
         public bool verboseLogging = true;
 
-        [Header("v1.2 MVP: SendTask timeout")]
-        [Tooltip("每個 click task 等回應多久（秒）")]
-        public float taskTimeoutSec = 3.0f;
+        [Header("v1.2 MVP: SendTask timeout（fallback）")]
+        [Tooltip("每個 click task 預設等回應多久（秒）— " +
+                 "v1.2+ 改成 per-area 設定（看 ClickableArea.taskTimeoutSec），" +
+                 "這欄是 ClickableArea 沒設或 < 0 時的 fallback。\n" +
+                 "5s 配 HermesBridgeClient.SendTaskAsync 預設值、" +
+                 "即時任務（motion.play）夠用。\n" +
+                 "會等 LLM 的 task 建議在 ClickableArea 設 15-30s、避免 chat 響應期間被誤判 timeout。")]
+        public float defaultTaskTimeoutSec = 5.0f;
+
+        [Header("v1.2+ 點擊限流（防 queue 爆炸）")]
+        [Tooltip("同一 area 兩次點擊最小間隔（秒）— 防狂點同一個部位。\n" +
+                 "0.5s = 連點最多每秒 2 次、夠防呆不影響正常互動。\n" +
+                 "設 0 = 不限制。\n" +
+                 "⚠️ 後端 TaskQueue 是 FIFO + 單 worker（bridge/agent_os.py），" +
+                 "狂點會讓 chat 也跟著等、響應會被拖到 100s+。")]
+        public float minClickIntervalSec = 0.5f;
+        [Tooltip("最多同時 in-flight 的 task 數 — 超過直接丟棄新點擊、避免後端 queue 堆積。\n" +
+                 "預設 3 = chat 在跑時還能 2 個 click 並行。\n" +
+                 "⚠️ 不要調太高、queue 是 single-worker 順序處理。")]
+        public int maxInFlightTasks = 3;
+
+        // 點擊限流 state（runtime only）
+        private readonly System.Collections.Generic.Dictionary<string, float> _lastClickTimeByArea
+            = new System.Collections.Generic.Dictionary<string, float>();
+        private int _inFlightTaskCount = 0;
+        private readonly object _clickLock = new object();
 
         private void Start()
         {
@@ -171,6 +218,7 @@ namespace Siro
 
         /// <summary>
         /// Mao 點擊事件 → 查 clickableAreas → SendTaskAsync
+        /// v1.2+ 加 debounce + in-flight 限流（防後端 TaskQueue 堆積炸掉）
         /// </summary>
         private async void HandleMaoClicked(string hitArea)
         {
@@ -191,23 +239,59 @@ namespace Siro
                 return;
             }
 
+            // v1.2+ 點擊限流檢查（在 SendTask 之前、避免無效進 queue）
+            // 1) in-flight 上限檢查
+            // 2) per-area debounce（防狂點同一個部位）
+            lock (_clickLock)
+            {
+                if (_inFlightTaskCount >= maxInFlightTasks)
+                {
+                    Debug.LogWarning(
+                        $"[PersonaClickHandler] in-flight 已滿 ({_inFlightTaskCount}/{maxInFlightTasks})、" +
+                        $"忽略點擊 {entry.task!}（防 queue 堆積）"
+                    );
+                    return;
+                }
+
+                if (minClickIntervalSec > 0f
+                    && _lastClickTimeByArea.TryGetValue(hitArea, out float lastClickTime))
+                {
+                    float elapsed = Time.unscaledTime - lastClickTime;
+                    if (elapsed < minClickIntervalSec)
+                    {
+                        // 不 log warning、正常防呆、狂點會被吞掉（verbose log 也只 warn 一次）
+                        if (verboseLogging) Debug.Log(
+                            $"[PersonaClickHandler] debounce {hitArea!}: {elapsed*1000:.0f}ms < {minClickIntervalSec*1000:.0f}ms、忽略"
+                        );
+                        return;
+                    }
+                }
+
+                // 通過檢查 → 記錄
+                _lastClickTimeByArea[hitArea] = Time.unscaledTime;
+                _inFlightTaskCount++;
+            }
+
             // 叫 SendTaskAsync — fire-and-await
             // 注意：async void 只用在 event handler（這裡就是）
             try
             {
                 var args = entry.ToArgs();
+                // v1.2+ per-area timeout：ClickableArea.taskTimeoutSec 沒設或 < 0 才掉 defaultTaskTimeoutSec
+                float timeout = entry.taskTimeoutSec > 0f ? entry.taskTimeoutSec : defaultTaskTimeoutSec;
                 if (verboseLogging) Debug.Log(
-                    $"[PersonaClickHandler] SendTask: {entry.task} args={args}"
+                    $"[PersonaClickHandler] SendTask: {entry.task} args={args} (timeout={timeout}s, in-flight={_inFlightTaskCount})"
                 );
-                var result = await bridge.SendTaskAsync(entry.task, args, taskTimeoutSec);
+                var result = await bridge.SendTaskAsync(entry.task, args, timeout);
                 if (verboseLogging) Debug.Log(
                     $"[PersonaClickHandler] SendTask 完成: {result}"
                 );
             }
             catch (TimeoutException)
             {
+                float usedTimeout = entry.taskTimeoutSec > 0f ? entry.taskTimeoutSec : defaultTaskTimeoutSec;
                 Debug.LogWarning(
-                    $"[PersonaClickHandler] SendTask {entry.task!} 超過 {taskTimeoutSec}s 沒回"
+                    $"[PersonaClickHandler] SendTask {entry.task!} 超過 {usedTimeout}s 沒回"
                 );
             }
             catch (SendTaskException ex)
@@ -226,6 +310,15 @@ namespace Siro
             catch (Exception e)
             {
                 Debug.LogError($"[PersonaClickHandler] 未知錯誤: {e}");
+            }
+            finally
+            {
+                // 不論成功失敗、release in-flight slot
+                lock (_clickLock)
+                {
+                    _inFlightTaskCount--;
+                    if (_inFlightTaskCount < 0) _inFlightTaskCount = 0;  // 安全網
+                }
             }
         }
     }

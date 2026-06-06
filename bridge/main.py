@@ -660,9 +660,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
     parser = _build_parser_for_persona(persona_name)
     t_parser = time.time() - t0
 
-    # 段 2: hermes is_available — 同步 subprocess，**會卡 event loop 最多 10s**
+    # 段 2: hermes is_available — 改用 asyncio.to_thread 跑 subprocess
+    # 否則會卡 event loop 最多 10s、期間其他 SendTask（mood.set / motion.play
+    # 點 Mao）也跟著被卡到 timeout。5s TTL cache 還在、cache miss 才真的問 hermes。
     t0 = time.time()
-    if not state.hermes.is_available():
+    if not await asyncio.to_thread(state.hermes.is_available):
         t_is_avail = time.time() - t0
         logger.warning(
             f"⏱ [chat] 段 2 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
@@ -826,6 +828,346 @@ async def chat(req: ChatRequest) -> ChatResponse:
     )
 
 
+def _log_async_task_exception(task: asyncio.Task) -> None:
+    """背景 task 的 exception sink — 給 asyncio.create_task 後用 add_done_callback 接
+
+    為什麼需要：
+    asyncio.create_task spawn 的 coroutine 如果噴 exception、沒人 await、
+    asyncio 會在 task GC 時 log "Task exception was never retrieved"（ERROR 等級）。
+    這在 production 環境會被誤判成「有 bug」、其實只是預期的錯誤場景。
+
+    典型場景：_process_ws_chat 背景跑 5-30s LLM call、Unity 中途斷線、
+    chat 跑完要 send_json 才發現 WS 已關、噴 RuntimeError 是預期的。
+
+    行為：
+    - task 正常完成（沒 exception）→ no-op、安靜
+    - task 噴 exception → log warning（不是 error）+ 保留 full traceback 給 debug
+    - 常見的「WS 已關」RuntimeError 降為 info（避免 log 噪音）
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    # 常見預期錯誤：Unity 斷線後 send_json 噴的 RuntimeError、WS close 後 receive
+    if isinstance(exc, RuntimeError) and "websocket" in str(exc).lower():
+        logger.info(f"[ws] 背景 task 預期結束（WS 已關）: {type(exc).__name__}: {exc}")
+        return
+    if isinstance(exc, WebSocketDisconnect):
+        logger.info(f"[ws] 背景 task 預期結束（client 斷線）: {exc}")
+        return
+    # 其他 exception 是真 bug、log warning + traceback
+    logger.warning(f"[ws] 背景 task 噴未預期 exception: {type(exc).__name__}: {exc}")
+    logger.warning("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+
+
+async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
+    """v1.2+ 抽出來 create_task 跑、不卡 receive loop。
+
+    原本 chat 處理（5-30s LLM call）INLINE 在 /ws 的 while loop、
+    整段期間不 `await receive_json` 也不 `await send_json`、
+    下一個 message（mood.set / motion.play 點 Mao）就卡 OS receive buffer、5s timeout 觸發。
+
+    抽出來後、main loop 立即回到 receive_json 收下一個 message。
+    SendTask (mood.set/motion.play) 走 AgentOS.enqueue_fast 立即有反應。
+
+    注意：背景 coroutine 噴 exception 不會被外層 except WebSocketDisconnect 接住、
+    呼叫端用 `_log_async_task_exception` 統一吃掉（Unity 中途斷線 → chat 跑完
+    才發現 WS 已關 → send_json 噴 RuntimeError 是預期的、log warning 就好）。
+    """
+    message = data.get("message", "").strip()
+    user_id = data.get("user_id", "default")
+    personality = data.get("personality", "default")
+
+    if not message:
+        await websocket.send_json({"type": "error", "detail": "訊息不能空白"})
+        return
+
+    # v0.2+：用 persona 專屬 parser 解析情緒
+    # v1.1+：分段計時診斷 60s 瓶頸
+    t_ws_total = time.time()
+    t0 = time.time()
+    parser = _build_parser_for_persona(personality)
+    t_parser = time.time() - t0
+
+    session_id = f"{user_id}-ws"
+
+    # is_available() — 改用 to_thread 跑 subprocess、不卡 event loop
+    # 不然 SendTask 點 Mao 會被同步 subprocess 卡到 timeout
+    t0 = time.time()
+    hermes_ok = await asyncio.to_thread(state.hermes.is_available)
+    t_is_avail = time.time() - t0
+
+    # 降級路徑：Hermes 不可用就直接走 fallback
+    if not hermes_ok:
+        logger.warning(
+            f"⏱ [ws] 段 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
+        )
+        fallback = await _make_fallback_response(
+            user_id=user_id,
+            session_id=session_id,
+            category="disconnected",
+            persona_name=personality,
+            error_detail="Hermes not available",
+            user_message=message,
+        )
+        await websocket.send_json({
+            "type": "response",
+            "text": fallback.text,
+            "emotion": fallback.emotion.value,
+            "intensity": fallback.intensity,
+            "live2d": fallback.live2d.model_dump(),
+            "session_id": fallback.session_id,
+        })
+        return
+
+    # v0.3.1 SSE streaming 路徑（STRATEGIC_NOTES Q2 選項 B）：
+    #   - SIRO_STREAMING=true → 走 MiniMaxStreamingClient.chat_stream() 收 SSE
+    #   - 每收到一個 text chunk 就推 {"type":"delta","text":"..."} 給 Unity
+    #   - 收集完所有 chunk 後 parse emotion、推 {"type":"response",...}
+    #   - Unity 端目前收到 delta 不 render（v1+ 才接 incremental render）
+    #   - 預設 false — 既有測試不動
+    t0 = time.time()
+    if state.use_streaming and state.streaming_client.is_available:
+        # 自己建 prompt + system（跟 v0.2 sync 路徑同樣邏輯）
+        stream_history = state.sessions.get(session_id, [])
+        stream_history_context = ""
+        if stream_history:
+            stream_history_context = "\n\n最近的對話：\n" + "\n".join(
+                f"使用者: {h['user']}\n你: {h['agent']}" for h in stream_history[-5:]
+            )
+        stream_prompt = f"{stream_history_context}\n\n使用者: {message}" if stream_history_context else message
+        stream_system = get_personality(personality)
+
+        logger.info(f"⏱ [ws] 走 MiniMax-M3 SSE streaming")
+        t_stream_start = time.time()
+        delta_count = 0
+        full_text_parts: list[str] = []
+        ttft_ms: Optional[int] = None
+        try:
+            async for chunk in state.streaming_client.chat_stream(
+                message=stream_prompt,
+                system_prompt=stream_system,
+            ):
+                if ttft_ms is None:
+                    ttft_ms = int((time.time() - t_stream_start) * 1000)
+                    logger.info(f"⚡ [ws] TTFT={ttft_ms}ms")
+                delta_count += 1
+                full_text_parts.append(chunk)
+                # 推 delta 給 Unity（v1+ 才用、目前客戶端會忽略）
+                await websocket.send_json({
+                    "type": "delta",
+                    "text": chunk,
+                })
+        except Exception as e:
+            logger.error(f"[ws] streaming 失敗: {e}")
+            # streaming 失敗 → 走 fallback（跟 sync 路徑的 hermes 失敗同樣處理）
+            fallback = await _make_fallback_response(
+                user_id=user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=personality,
+                error_detail=f"streaming error: {e}",
+                user_message=message,
+            )
+            await websocket.send_json({
+                "type": "response",
+                "text": fallback.text,
+                "emotion": fallback.emotion.value,
+                "intensity": fallback.intensity,
+                "live2d": fallback.live2d.model_dump(),
+                "session_id": fallback.session_id,
+            })
+            return
+
+        full_text = "".join(full_text_parts)
+        t_stream_total = int((time.time() - t_stream_start) * 1000)
+        logger.info(
+            f"💬 [ws-streaming] user={message[:40]!r} → llm={full_text[:80]!r} "
+            f"[⚡ TTFT={ttft_ms}ms total={t_stream_total}ms deltas={delta_count}]"
+        )
+        # 解析情緒（跟 sync 路徑一樣用 persona 專屬 parser）
+        clean_text, emotion, intensity = parser.parse(
+            full_text, user_input=message
+        )
+        live2d_signal = parser.to_live2d_signal(emotion, intensity)
+        # 寫歷史（同樣用 state.sessions_lock）
+        with state.sessions_lock:
+            if session_id not in state.sessions:
+                state.sessions[session_id] = []
+            state.sessions[session_id].append({
+                "user": message,
+                "agent": clean_text,
+                "emotion": emotion.value,
+            })
+            state.sessions[session_id] = state.sessions[session_id][-20:]
+        # 推 final response（Unity 端跟 sync 路徑收到的格式一樣）
+        await websocket.send_json({
+            "type": "response",
+            "text": clean_text,
+            "emotion": emotion.value,
+            "intensity": intensity,
+            "live2d": live2d_signal.model_dump(),
+            "session_id": session_id,
+        })
+        return
+
+    # v0.3 段 4 兩條路徑（跟 /chat 對齊）：
+    #   A. SIRO_USE_AGENT_OS=true → enqueue AgentOS task，await wait_for_task()
+    #   B. false (預設) → 直接 asyncio.to_thread(state.hermes.chat) 走 v0.2 路徑
+    t0 = time.time()
+    if state.use_agent_os and state.agent_os:
+        # v0.3 AgentOS 路徑：/ws 跟 /chat 走同一個 llm_reply_task factory
+        task = create_llm_reply_task(
+            state=state,
+            user_id=user_id,
+            message=message,
+            persona_name=personality,
+            session_id=session_id,
+        )
+        state.agent_os.enqueue(task)
+        logger.info(f"⏱ [ws] enqueue task id={task.id} → 走 AgentOS")
+        agent_result = await state.agent_os.wait_for_task(
+            "llm.reply", task.id, timeout=600.0,
+        )
+        t_hermes = time.time() - t0
+        if agent_result is None:
+            fallback = await _make_fallback_response(
+                user_id=user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=personality,
+                error_detail="LLM timeout via AgentOS",
+                user_message=message,
+            )
+            await websocket.send_json({
+                "type": "response",
+                "text": fallback.text,
+                "emotion": fallback.emotion.value,
+                "intensity": fallback.intensity,
+                "live2d": fallback.live2d.model_dump(),
+                "session_id": fallback.session_id,
+            })
+            return
+        if "error" in agent_result:
+            fallback = await _make_fallback_response(
+                user_id=user_id,
+                session_id=session_id,
+                category="error",
+                persona_name=personality,
+                error_detail=agent_result["error"],
+                user_message=message,
+            )
+            await websocket.send_json({
+                "type": "response",
+                "text": fallback.text,
+                "emotion": fallback.emotion.value,
+                "intensity": fallback.intensity,
+                "live2d": fallback.live2d.model_dump(),
+                "session_id": fallback.session_id,
+            })
+            return
+        # 成功 — task 已經做完 history + parse + live2d signal，
+        # 結果在 agent_result["result"] 內
+        result = agent_result["result"]
+        t_ws_total = (time.time() - t_ws_total) * 1000
+        logger.info(
+            f"💬 [ws] user={message[:40]!r} → llm={result.get('text','')[:80]!r} → emotion={result['emotion']} "
+            f"[⏱分段: via=AgentOS parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+            f"task_in_queue={t_hermes*1000:.0f}ms total={t_ws_total:.0f}ms]"
+        )
+        await websocket.send_json({
+            "type": "response",
+            "text": result["text"],
+            "emotion": result["emotion"],
+            "intensity": result["intensity"],
+            "live2d": result["live2d"],
+            "session_id": result["session_id"],
+        })
+        return
+
+    # 跑對話
+    t0 = time.time()
+    history = state.sessions.get(session_id, [])
+    history_context = ""
+    if history:
+        history_context = "\n\n最近的對話：\n" + "\n".join(
+            f"使用者: {h['user']}\n你: {h['agent']}" for h in history[-5:]
+        )
+    t_history = time.time() - t0
+
+    prompt_message = f"{history_context}\n\n使用者: {message}" if history_context else message
+    system_prompt = get_personality(personality)
+
+    # 段 4: 呼叫 Hermes（to_thread 把 subprocess 跑在 thread pool）
+    t0 = time.time()
+    result = await asyncio.to_thread(
+        state.hermes.chat,
+        message=prompt_message,
+        system_prompt=system_prompt,
+    )
+    t_hermes = time.time() - t0
+
+    if not result.success:
+        # 降級而非 error event：Mao 切 thinking、講「嗯..."
+        fallback = await _make_fallback_response(
+            user_id=user_id,
+            session_id=session_id,
+            category="error",
+            persona_name=personality,
+            error_detail=f"Hermes failed: {result.error}",
+            user_message=message,
+        )
+        await websocket.send_json({
+            "type": "response",
+            "text": fallback.text,
+            "emotion": fallback.emotion.value,
+            "intensity": fallback.intensity,
+            "live2d": fallback.live2d.model_dump(),
+            "session_id": fallback.session_id,
+        })
+        return
+
+    # 段 5: 解析情緒
+    t0 = time.time()
+    clean_text, emotion, intensity = parser.parse(
+        result.output, user_input=message
+    )
+    live2d_signal = parser.to_live2d_signal(emotion, intensity)
+    t_parse = time.time() - t0
+
+    # v1.1+：完整分段計時 log（跟 /chat 對齊）
+    t_ws_total = (time.time() - t_ws_total) * 1000
+    logger.info(
+        f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}\n"
+        f"   ⏱分段: parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
+        f"history={t_history*1000:.0f}ms hermes_chat={t_hermes*1000:.0f}ms parse={t_parse*1000:.0f}ms "
+        f"total={t_ws_total:.0f}ms"
+    )
+
+    # 記錄歷史（v0.2+：RLock 保護，跟 /chat 一致）
+    with state.sessions_lock:
+        if session_id not in state.sessions:
+            state.sessions[session_id] = []
+        state.sessions[session_id].append({
+            "user": message,
+            "agent": clean_text,
+            "emotion": emotion.value,
+        })
+        state.sessions[session_id] = state.sessions[session_id][-20:]
+
+    await websocket.send_json({
+        "type": "response",
+        "text": clean_text,
+        "emotion": emotion.value,
+        "intensity": intensity,
+        "live2d": live2d_signal.model_dump(),
+        "session_id": session_id,
+    })
+
+
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -857,7 +1199,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # 注意：is_available() false 不關連線。讓 Unity 維持連線、後續每次
     # chat 走 fallback。這樣 Mao 看起來「在但有點傻」而非「失蹤」。
-    if not state.hermes.is_available():
+    # 改用 to_thread：不卡 event loop、WS 接收 loop 仍能處理 ping/SendTask
+    if not await asyncio.to_thread(state.hermes.is_available):
         logger.warning("⚠ Hermes 不可用，但維持 WebSocket 連線、走 fallback response")
 
     try:
@@ -870,294 +1213,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             if msg_type == "chat":
-                message = data.get("message", "").strip()
-                user_id = data.get("user_id", "default")
-                personality = data.get("personality", "default")
-
-                if not message:
-                    await websocket.send_json({"type": "error", "detail": "訊息不能空白"})
-                    continue
-
-                # v0.2+：用 persona 專屬 parser 解析情緒
-                # v1.1+：分段計時診斷 60s 瓶頸
-                t_ws_total = time.time()
-                t0 = time.time()
-                parser = _build_parser_for_persona(personality)
-                t_parser = time.time() - t0
-
-                session_id = f"{user_id}-ws"
-
-                # is_available() — 同步 subprocess，最多 10s 卡 event loop
-                t0 = time.time()
-                hermes_ok = state.hermes.is_available()
-                t_is_avail = time.time() - t0
-
-                # 降級路徑：Hermes 不可用就直接走 fallback
-                if not hermes_ok:
-                    logger.warning(
-                        f"⏱ [ws] 段 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
-                    )
-                    fallback = await _make_fallback_response(
-                        user_id=user_id,
-                        session_id=session_id,
-                        category="disconnected",
-                        persona_name=personality,
-                        error_detail="Hermes not available",
-                        user_message=message,
-                    )
-                    await websocket.send_json({
-                        "type": "response",
-                        "text": fallback.text,
-                        "emotion": fallback.emotion.value,
-                        "intensity": fallback.intensity,
-                        "live2d": fallback.live2d.model_dump(),
-                        "session_id": fallback.session_id,
-                    })
-                    continue
-
-                # v0.3.1 SSE streaming 路徑（STRATEGIC_NOTES Q2 選項 B）：
-                #   - SIRO_STREAMING=true → 走 MiniMaxStreamingClient.chat_stream() 收 SSE
-                #   - 每收到一個 text chunk 就推 {"type":"delta","text":"..."} 給 Unity
-                #   - 收集完所有 chunk 後 parse emotion、推 {"type":"response",...}
-                #   - Unity 端目前收到 delta 不 render（v1+ 才接 incremental render）
-                #   - 預設 false — 既有測試不動
-                t0 = time.time()
-                if state.use_streaming and state.streaming_client.is_available:
-                    # 自己建 prompt + system（跟 v0.2 sync 路徑同樣邏輯）
-                    stream_history = state.sessions.get(session_id, [])
-                    stream_history_context = ""
-                    if stream_history:
-                        stream_history_context = "\n\n最近的對話：\n" + "\n".join(
-                            f"使用者: {h['user']}\n你: {h['agent']}" for h in stream_history[-5:]
-                        )
-                    stream_prompt = f"{stream_history_context}\n\n使用者: {message}" if stream_history_context else message
-                    stream_system = get_personality(personality)
-
-                    logger.info(f"⏱ [ws] 走 MiniMax-M3 SSE streaming")
-                    t_stream_start = time.time()
-                    delta_count = 0
-                    full_text_parts: list[str] = []
-                    ttft_ms: Optional[int] = None
-                    try:
-                        async for chunk in state.streaming_client.chat_stream(
-                            message=stream_prompt,
-                            system_prompt=stream_system,
-                        ):
-                            if ttft_ms is None:
-                                ttft_ms = int((time.time() - t_stream_start) * 1000)
-                                logger.info(f"⚡ [ws] TTFT={ttft_ms}ms")
-                            delta_count += 1
-                            full_text_parts.append(chunk)
-                            # 推 delta 給 Unity（v1+ 才用、目前客戶端會忽略）
-                            await websocket.send_json({
-                                "type": "delta",
-                                "text": chunk,
-                            })
-                    except Exception as e:
-                        logger.error(f"[ws] streaming 失敗: {e}")
-                        # streaming 失敗 → 走 fallback（跟 sync 路徑的 hermes 失敗同樣處理）
-                        fallback = await _make_fallback_response(
-                            user_id=user_id,
-                            session_id=session_id,
-                            category="error",
-                            persona_name=personality,
-                            error_detail=f"streaming error: {e}",
-                            user_message=message,
-                        )
-                        await websocket.send_json({
-                            "type": "response",
-                            "text": fallback.text,
-                            "emotion": fallback.emotion.value,
-                            "intensity": fallback.intensity,
-                            "live2d": fallback.live2d.model_dump(),
-                            "session_id": fallback.session_id,
-                        })
-                        continue
-
-                    full_text = "".join(full_text_parts)
-                    t_stream_total = int((time.time() - t_stream_start) * 1000)
-                    logger.info(
-                        f"💬 [ws-streaming] user={message[:40]!r} → llm={full_text[:80]!r} "
-                        f"[⚡ TTFT={ttft_ms}ms total={t_stream_total}ms deltas={delta_count}]"
-                    )
-                    # 解析情緒（跟 sync 路徑一樣用 persona 專屬 parser）
-                    clean_text, emotion, intensity = parser.parse(
-                        full_text, user_input=message
-                    )
-                    live2d_signal = parser.to_live2d_signal(emotion, intensity)
-                    # 寫歷史（同樣用 state.sessions_lock）
-                    with state.sessions_lock:
-                        if session_id not in state.sessions:
-                            state.sessions[session_id] = []
-                        state.sessions[session_id].append({
-                            "user": message,
-                            "agent": clean_text,
-                            "emotion": emotion.value,
-                        })
-                        state.sessions[session_id] = state.sessions[session_id][-20:]
-                    # 推 final response（Unity 端跟 sync 路徑收到的格式一樣）
-                    await websocket.send_json({
-                        "type": "response",
-                        "text": clean_text,
-                        "emotion": emotion.value,
-                        "intensity": intensity,
-                        "live2d": live2d_signal.model_dump(),
-                        "session_id": session_id,
-                    })
-                    continue
-
-                # v0.3 段 4 兩條路徑（跟 /chat 對齊）：
-                #   A. SIRO_USE_AGENT_OS=true → enqueue AgentOS task，await wait_for_task()
-                #   B. false (預設) → 直接 asyncio.to_thread(state.hermes.chat) 走 v0.2 路徑
-                t0 = time.time()
-                if state.use_agent_os and state.agent_os:
-                    # v0.3 AgentOS 路徑：/ws 跟 /chat 走同一個 llm_reply_task factory
-                    task = create_llm_reply_task(
-                        state=state,
-                        user_id=user_id,
-                        message=message,
-                        persona_name=personality,
-                        session_id=session_id,
-                    )
-                    state.agent_os.enqueue(task)
-                    logger.info(f"⏱ [ws] enqueue task id={task.id} → 走 AgentOS")
-                    agent_result = await state.agent_os.wait_for_task(
-                        "llm.reply", task.id, timeout=600.0,
-                    )
-                    t_hermes = time.time() - t0
-                    if agent_result is None:
-                        fallback = await _make_fallback_response(
-                            user_id=user_id,
-                            session_id=session_id,
-                            category="error",
-                            persona_name=personality,
-                            error_detail="LLM timeout via AgentOS",
-                            user_message=message,
-                        )
-                        await websocket.send_json({
-                            "type": "response",
-                            "text": fallback.text,
-                            "emotion": fallback.emotion.value,
-                            "intensity": fallback.intensity,
-                            "live2d": fallback.live2d.model_dump(),
-                            "session_id": fallback.session_id,
-                        })
-                        continue
-                    if "error" in agent_result:
-                        fallback = await _make_fallback_response(
-                            user_id=user_id,
-                            session_id=session_id,
-                            category="error",
-                            persona_name=personality,
-                            error_detail=agent_result["error"],
-                            user_message=message,
-                        )
-                        await websocket.send_json({
-                            "type": "response",
-                            "text": fallback.text,
-                            "emotion": fallback.emotion.value,
-                            "intensity": fallback.intensity,
-                            "live2d": fallback.live2d.model_dump(),
-                            "session_id": fallback.session_id,
-                        })
-                        continue
-                    # 成功 — task 已經做完 history + parse + live2d signal，
-                    # 結果在 agent_result["result"] 內
-                    result = agent_result["result"]
-                    t_ws_total = (time.time() - t_ws_total) * 1000
-                    logger.info(
-                        f"💬 [ws] user={message[:40]!r} → llm={result.get('text','')[:80]!r} → emotion={result['emotion']} "
-                        f"[⏱分段: via=AgentOS parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
-                        f"task_in_queue={t_hermes*1000:.0f}ms total={t_ws_total:.0f}ms]"
-                    )
-                    await websocket.send_json({
-                        "type": "response",
-                        "text": result["text"],
-                        "emotion": result["emotion"],
-                        "intensity": result["intensity"],
-                        "live2d": result["live2d"],
-                        "session_id": result["session_id"],
-                    })
-                    continue
-
-                # 跑對話
-                t0 = time.time()
-                history = state.sessions.get(session_id, [])
-                history_context = ""
-                if history:
-                    history_context = "\n\n最近的對話：\n" + "\n".join(
-                        f"使用者: {h['user']}\n你: {h['agent']}" for h in history[-5:]
-                    )
-                t_history = time.time() - t0
-
-                prompt_message = f"{history_context}\n\n使用者: {message}" if history_context else message
-                system_prompt = get_personality(personality)
-
-                # 段 4: 呼叫 Hermes（to_thread 把 subprocess 跑在 thread pool）
-                t0 = time.time()
-                result = await asyncio.to_thread(
-                    state.hermes.chat,
-                    message=prompt_message,
-                    system_prompt=system_prompt,
-                )
-                t_hermes = time.time() - t0
-
-                if not result.success:
-                    # 降級而非 error event：Mao 切 thinking、講「嗯..."
-                    fallback = await _make_fallback_response(
-                        user_id=user_id,
-                        session_id=session_id,
-                        category="error",
-                        persona_name=personality,
-                        error_detail=f"Hermes failed: {result.error}",
-                        user_message=message,
-                    )
-                    await websocket.send_json({
-                        "type": "response",
-                        "text": fallback.text,
-                        "emotion": fallback.emotion.value,
-                        "intensity": fallback.intensity,
-                        "live2d": fallback.live2d.model_dump(),
-                        "session_id": fallback.session_id,
-                    })
-                    continue
-
-                # 段 5: 解析情緒
-                t0 = time.time()
-                clean_text, emotion, intensity = parser.parse(
-                    result.output, user_input=message
-                )
-                live2d_signal = parser.to_live2d_signal(emotion, intensity)
-                t_parse = time.time() - t0
-
-                # v1.1+：完整分段計時 log（跟 /chat 對齊）
-                t_ws_total = (time.time() - t_ws_total) * 1000
-                logger.info(
-                    f"💬 user={message[:40]!r} → llm={result.output[:80]!r} → emotion={emotion.value}\n"
-                    f"   ⏱分段: parser={t_parser*1000:.0f}ms is_avail={t_is_avail*1000:.0f}ms "
-                    f"history={t_history*1000:.0f}ms hermes_chat={t_hermes*1000:.0f}ms parse={t_parse*1000:.0f}ms "
-                    f"total={t_ws_total:.0f}ms"
-                )
-
-                # 記錄歷史（v0.2+：RLock 保護，跟 /chat 一致）
-                with state.sessions_lock:
-                    if session_id not in state.sessions:
-                        state.sessions[session_id] = []
-                    state.sessions[session_id].append({
-                        "user": message,
-                        "agent": clean_text,
-                        "emotion": emotion.value,
-                    })
-                    state.sessions[session_id] = state.sessions[session_id][-20:]
-
-                await websocket.send_json({
-                    "type": "response",
-                    "text": clean_text,
-                    "emotion": emotion.value,
-                    "intensity": intensity,
-                    "live2d": live2d_signal.model_dump(),
-                    "session_id": session_id,
-                })
+                # v1.2+ 改：chat 處理整段 create_task 出去跑、不卡 receive loop
+                # 原因：chat 走 AgentOS / SSE streaming / hermes LLM call 全是慢任務（5-30s）、
+                #       之前 INLINE 在 while loop、整段期間不 await receive_json 也不 await send_json、
+                #       下一個 message（mood.set / motion.play 點 Mao）就卡 OS receive buffer、
+                #       5s timeout 觸發時 chat 都還沒結束。
+                # 解法：chat 整段抽成背景 coroutine、main loop 立即回到 receive_json 收下一個 message。
+                # 注意：背景 coroutine 噴 exception 不會被外層 except WebSocketDisconnect 接住、
+                #       add_done_callback 統一吃 log warning、避免 asyncio 報 "Task exception was never retrieved"
+                #       （常見：Unity 中途斷線、chat 跑完要 send_json 才發現 WS 已關）
+                chat_task = asyncio.create_task(_process_ws_chat(websocket, data))
+                chat_task.add_done_callback(_log_async_task_exception)
+                continue
 
             elif msg_type == "task":
                 # v1.2 SendTask：Unity 主動推 task 進 bridge
