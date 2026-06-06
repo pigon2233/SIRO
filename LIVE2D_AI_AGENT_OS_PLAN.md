@@ -1274,3 +1274,27 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 | 2026-06-04 | v2.0.x | v0.3 期間的細部修訂（PLAN_REVIEW_v0.3、PLAN_REVISION_v2.1）— 見`docs/PLAN_REVIEW_v0.3.md`                                                                                                                                                                                                                                                                                                                                |
 | 2026-06-02 | v2.0   | 砍掉重寫。加入 Rust OS 層、4 層架構、6 個 Phase、完整文件清單、AI 協作指南                                                                                                                                                                                                                                                                                                                                                |
 | 2026-06-02 | v1.0   | 初版（過度樂觀，文件描述願景而非現實）                                                                                                                                                                                                                                                                                                                                                                                    |
+
+---
+
+## Phase 3 前置作業（v0.2.0、2026-06-07 commit）
+
+正式進入 Phase 3 前的準備、避免 Phase 3 啟動時卡在 scaffold。
+
+**已完成**：
+- [X] workspace deps: `tonic` 0.12 + `tonic-prost` 0.12 + `tonic-prost-build` 0.12 + `prost` 0.13 + `chrono` 0.4
+- [X] `siro-runtime/build.rs` 從 `proto/siro.proto` 生成 Rust gRPC stubs
+- [X] `siro-runtime/src/grpc.rs` 8 個 RPC 全部 stub 化、GetStatus + Health 簡單實作
+- [X] `siro-runtime/src/main.rs` 啟動 tokio runtime + tonic gRPC server（預設 127.0.0.1:50051、`--grpc-addr` 可覆蓋）
+- [X] `os-runtime/README.md` 加 protoc 安裝指引（Ubuntu/macOS/Windows）+ 故障排除
+- [X] `docs/ADR/0001-stt-tts-選型.md` — STT (whisper.cpp) / TTS (piper) / Audio I/O (cpal) / VAD (webrtc-vad) 選型
+- [X] `docs/ADR/0002-subsystem-failure-對話對應.md` — 12 個 subsystem × Unity UX × persona dialog 對應表
+- [X] `docs/PHASE2_TEST_REPORT.md` — Phase 2 23 個交付物盤點 + KPI 量化
+
+**Phase 3 正式開始時要做的**：
+- protoc 裝好後、`cargo build` 應能直接過
+- 把 `SiroRuntimeServer` 8 個 RPC stub 換成實際實作
+- 加 process supervisor（[ADR 0002](../docs/ADR/0002-subsystem-failure-對話對應.md) 12 個 subsystem 監控）
+- 加 hardware abstraction（cpal 抓音訊、sysinfo 抓 CPU/memory/GPU）
+- bridge 端加 gRPC client（`bridge/grpc_client/`、用 `proto/siro.proto` 生成 Python stubs）
+- Unity 端加 status icon + 收 `system_event` WS 訊息

@@ -16,9 +16,12 @@ repository = "https://github.com/pigon2233/SIRO"
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
-# gRPC (Phase 3 才會用到，現在先預留)
-# tonic = "0.12"
-# prost = "0.13"
+# gRPC — Phase 3 啟用（需要 protoc 3.x 裝好才能 cargo build）
+# 安裝指引見 os-runtime/README.md
+tonic = "0.12"
+tonic-prost = "0.12"
+tonic-prost-build = "0.12"
+prost = "0.13"
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 # 設定
@@ -32,6 +35,10 @@ anyhow = "1.0"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Time（grpc health / started_at 用）
+chrono = "0.4"
+# 硬體偵測（Phase 3 用）
+# sysinfo = "0.31"
 
 # 優化設定
 [profile.release]

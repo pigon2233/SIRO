@@ -7,9 +7,12 @@
 
 ## 當前狀態
 
-**v0.1.0 - Scaffold**：只有 workspace 結構 + 兩個最小的可運行 binary。
-
-完整實作從 [Phase 3](../LIVE2D_AI_AGENT_OS_PLAN.md#phase-3-rust-系統層) 開始，預計 3-4 週。
+**v0.2.0 - Phase 3 前置作業完成**：
+- ✅ gRPC 依賴 enable（tonic + prost + tonic-prost-build）
+- ✅ build.rs 從 `proto/siro.proto` 生成 Rust stubs
+- ✅ `src/grpc.rs` skeleton：所有 RPC 接到 stub、GetStatus + Health 簡單實作
+- ✅ chrono dep（給 health started_at 用）
+- ⏳ 實際 supervisor / hardware / kiosk 實作 → Phase 3 正式開始時
 
 ---
 
@@ -24,7 +27,10 @@ os-runtime/
 └── crates/
     ├── siro-runtime/            # 主 daemon
     │   ├── Cargo.toml
-    │   └── src/main.rs
+    │   ├── build.rs             # 從 proto/ 生成 Rust stubs
+    │   └── src/
+    │       ├── main.rs          # CLI + 啟動 gRPC server
+    │       └── grpc.rs          # tonic server trait 實作（stub）
     └── siro-ctl/                # CLI 工具
         ├── Cargo.toml
         └── src/main.rs
@@ -43,7 +49,7 @@ os-runtime/
 ### 前置需求
 
 - **Rust 1.80+**（[rustup.rs](https://rustup.rs/)）
-- **protoc**（Protocol Buffers compiler）— gRPC 程式碼生成用
+- **protoc 3.x**（Protocol Buffers compiler）— gRPC 程式碼生成用
 
 ```bash
 # 安裝 Rust
@@ -54,9 +60,20 @@ source $HOME/.cargo/env
 rustc --version  # >= 1.80
 cargo --version
 
-# 安裝 protoc (Ubuntu)
+# 安裝 protoc
+# Ubuntu/Debian
 sudo apt install protobuf-compiler
+
+# macOS
+brew install protobuf
+
+# Windows（用 choco 或 scoop）
+choco install protoc
+# 或
+scoop install protobuf
 ```
+
+確認 `protoc --version` 顯示 3.x。
 
 ### Build
 
@@ -68,6 +85,7 @@ cargo build
 Debug build：
 ```bash
 cargo run --bin siro-runtime -- --help
+cargo run --bin siro-runtime -- --grpc-addr 127.0.0.1:50051
 cargo run --bin siro-ctl -- --help
 ```
 
@@ -89,6 +107,26 @@ cargo test
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
+
+### 故障排除
+
+#### `error: failed to load manifest` 或 `protoc not found`
+
+表示 protoc 沒裝好或 PATH 找不到。試：
+```bash
+which protoc
+protoc --version   # 應顯示 3.x
+```
+
+如果 protoc 在但 cargo 找不到、設 `PROTOC` 環境變數：
+```bash
+export PROTOC=/usr/local/bin/protoc
+cargo build
+```
+
+#### `error: tonic-prost-build not found`
+
+表示 workspace Cargo.toml 沒 enable 那個 dep。確認 [Cargo.toml](Cargo.toml) 有 `tonic-prost-build = "0.12"` 在 `[workspace.dependencies]`。
 
 ---
 
@@ -116,6 +154,8 @@ cargo fmt --check
 ```
 
 完整介面契約見 [proto/siro.proto](proto/siro.proto)。
+Phase 3 設計決策見 [../docs/ADR/0001-stt-tts-選型.md](../docs/ADR/0001-stt-tts-選型.md)、
+[../docs/ADR/0002-subsystem-failure-對話對應.md](../docs/ADR/0002-subsystem-failure-對話對應.md)。
 
 ---
 
@@ -132,13 +172,14 @@ cargo build --release --target aarch64-unknown-linux-gnu
 
 ---
 
-## 不在當前 v0.1.0 範圍
+## 不在當前 v0.2.0 範圍
 
-- ❌ gRPC server（proto 已定義，實作在 Phase 3）
-- ❌ 進程 supervisor
-- ❌ 硬體偵測
+- ❌ 進程 supervisor（Phase 3 開始時）
+- ❌ 硬體偵測（Phase 3 開始時）
 - ❌ Kiosk 模式
 - ❌ systemd 整合
 - ❌ 設定管理
+- ❌ 實際 STT/TTS（Phase 5、ADR 0001 已選型）
 
-這些是 Phase 3 的工作。現在只有 workspace 結構 + placeholder binary。
+v0.2.0 已經有：workspace + proto + gRPC server skeleton + 所有 RPC 接到 stub。
+Phase 3 正式開始時、就是把 stub 換成實際實作。
