@@ -40,17 +40,22 @@ SET_MOOD_TOOL: Dict[str, Any] = {
             "emotion": {
                 "type": "string",
                 "enum": [
-                    "happy",        # 開心、滿足
-                    "sad",          # 難過、失落
-                    "angry",        # 生氣、不滿
-                    "surprised",    # 驚訝、意外
-                    "neutral",      # 平靜、沒情緒
-                    "relaxed",      # 放鬆、悠閒
-                    "thinking",     # 思考、疑惑
-                    "embarrassed",  # 害羞、不好意思
-                    "love",         # 喜歡、關愛
+                    "happy",      # exp_01 開心、滿足
+                    "joyful",     # exp_02 哈哈大笑
+                    "proud",      # exp_03 驕傲、得意
+                    "excited",    # exp_04 興奮
+                    "sad",        # exp_05 難過、失落
+                    "thinking",   # exp_06 思考、疑惑（借用害羞 expression）
+                    "surprised",  # exp_07 驚訝、意外
+                    "angry",      # exp_08 生氣、不滿
+                    "neutral",    # 無對應 expression、fallback 到 default
                 ],
-                "description": "The emotion to display on Mao's face. Must be one of the 9 supported emotions."
+                "description": (
+                    "The emotion to display on Mao's face. "
+                    "Mao 支援 8 個 expression（exp_01-exp_08）+ neutral fallback、"
+                    "所以 emotion 限定這 9 個值。\n"
+                    "對應規則見 bridge/emotion_mapping.json emotion_map 段。"
+                ),
             },
             "intensity": {
                 "type": "number",
