@@ -423,6 +423,12 @@ namespace Siro
         }
 
         /// <summary>
+        /// 取得當前 expression ID（v1.2+ KPI 量測工具會用到）
+        /// 沒設過 expression 就回空字串
+        /// </summary>
+        public string GetCurrentExpressionId() => _currentExpressionId;
+
+        /// <summary>
         /// 切換 expression。
         /// </summary>
         /// <param name="expressionId">Cubism expression ID，如 "F02" (happy)</param>
