@@ -123,9 +123,14 @@ namespace Siro
 #if SIRO_HAS_CUBISM
         private CubismModel _model;
         private CubismExpressionController _expressionController;
-        // v1.2+：Unity Animation component（PlayMotion 用、不用 CubismMotionController）
+        // v1.2+：Unity Animation component（PlayMotion fallback 用、沒 CubismMotionController 才用）
         // Awake 不抓、首次 PlayMotion 才 GetComponent、需要時自動 AddComponent
         private Animation _unityAnimation;
+#if SIRO_HAS_CUBISM
+        // v1.2+：PlayMotion 優先用 CubismMotionController（支援 .fade 跟 .anim 兩種）
+        // Mao 沒 CubismMotionController 才掉 Unity Animation fallback
+        private CubismMotionController _motionController;
+#endif
         private MeshRenderer[] _eyeRenderers;  // 預存的眼球 MeshRenderer（依 eyeDrawableIndices）
 #endif
 
@@ -172,7 +177,9 @@ namespace Siro
         {
             _model = GetComponent<CubismModel>();
             _expressionController = GetComponent<CubismExpressionController>();
-            // v1.2+：不抓 CubismMotionController、PlayMotion 改用 Unity Animation
+#if SIRO_HAS_CUBISM
+            _motionController = GetComponent<CubismMotionController>();
+#endif
             // 注意：CacheEyeRenderers() 移到 Start()，因為 Cubism Drawable
             // 在 Awake 階段不一定 ready（Cubism 內部需要 Awake 完整跑完）。
         }
@@ -242,18 +249,16 @@ namespace Siro
             }
             if (verboseLogging)
             {
-                // v1.2+ 不再用 CubismMotionController、PlayMotion 用 Unity Animation
-                // log 提示 Mao 是否已配 Animation component
-                if (_unityAnimation == null) _unityAnimation = GetComponent<Animation>();
-                if (_unityAnimation != null)
+                // v1.2+ PlayMotion 優先用 CubismMotionController（.fade / .anim 都能播）
+                if (_motionController != null)
                 {
-                    Debug.Log("[Live2DModelController] PlayMotion 用 Unity Animation component");
+                    Debug.Log("[Live2DModelController] PlayMotion 用 CubismMotionController");
                 }
                 else
                 {
                     Debug.LogWarning(
-                        "[Live2DModelController] Mao 沒有 Animation component、" +
-                        "PlayMotion 會自動加（不過建議 prefab 預先設好）"
+                        "[Live2DModelController] Mao 沒有 CubismMotionController、PlayMotion 會掉 " +
+                        "Unity Animation fallback（需要 mtn_01.anim 設 Legacy rig 才能正常播）"
                     );
                 }
             }
@@ -489,7 +494,7 @@ namespace Siro
         /// <param name="clip">要播的 .anim（AnimationClip）。null 就停掉所有 motion。</param>
         /// <param name="isLoop">是否 loop。idle 用 true、tap 用 false。</param>
         /// <param name="fadeInSeconds">淡入時間（避免突然切換）。預設 1s。</param>
-        /// <param name="priority">保留參數為向後相容（v1.2+ 不再用 CubismPriority）</param>
+        /// <param name="priority">Cubism priority 預設 Normal (=2)。Idle 設 IdlePriority (=1) 容易被 tap 打斷。</param>
         public void PlayMotion(AnimationClip clip, bool isLoop = true, float fadeInSeconds = 1.0f, int priority = 2)
         {
             if (clip == null)
@@ -498,23 +503,47 @@ namespace Siro
                 return;
             }
 
-            // v1.2+：直接用 Unity Animation component（v0.x 用 CubismMotionController 、
-            // 但 mtn_01.anim 是標準 Unity AnimationClip、不需要 Cubism 介接）
-            // 比 Cubism 簡單、不需要 Animator、PlayAnimation 不需配 Cubism priority
+            // v1.2+：優先用 CubismMotionController（.fade 跟 .anim 都能播、Cubism 官方路徑）
+            // 之前 commit 1c7d8a6 把這拿掉是錯的、只是避開「無 motion controller」warning
+            // 正確解法是 CubismMotionController 沒時才掉 Unity Animation
+#if SIRO_HAS_CUBISM
+            if (_motionController != null)
+            {
+                try
+                {
+                    _motionController.PlayAnimation(
+                        clip,
+                        layerIndex: 0,
+                        priority: priority,
+                        isLoop: isLoop,
+                        speed: 1.0f
+                    );
+                    if (verboseLogging) Debug.Log(
+                        $"[Live2DModelController] PlayMotion: {clip.name} (Cubism, loop={isLoop})"
+                    );
+                    return;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[Live2DModelController] Cubism PlayMotion 失敗: {e.Message}");
+                }
+            }
+#endif
+
+            // 路徑 2: Unity Animation component（沒 CubismMotionController 時 fallback）
+            // 只支援 Legacy .anim（Generic 會有 warning、但還是能播）
             if (_unityAnimation == null)
             {
                 _unityAnimation = GetComponent<Animation>();
             }
             if (_unityAnimation == null)
             {
-                // 自動加 component（最常見的 missing setup、不用 user 手動加）
                 _unityAnimation = gameObject.AddComponent<Animation>();
                 if (verboseLogging) Debug.Log(
-                    "[Live2DModelController] 自動加 Animation component（Mao prefab 缺、補上）"
+                    "[Live2DModelController] 自動加 Animation component（Mao 缺、補上）"
                 );
             }
 
-            // 把 clip 加進 Animation（如果還沒）、設為預設 clip、播
             if (_unityAnimation.GetClip(clip.name) == null)
             {
                 _unityAnimation.AddClip(clip, clip.name);
@@ -523,7 +552,7 @@ namespace Siro
             _unityAnimation.wrapMode = isLoop ? WrapMode.Loop : WrapMode.Once;
             _unityAnimation.Play();
             if (verboseLogging) Debug.Log(
-                $"[Live2DModelController] PlayMotion: {clip.name} (Unity Animation, loop={isLoop})"
+                $"[Live2DModelController] PlayMotion: {clip.name} (Unity Animation fallback, loop={isLoop})"
             );
         }
 
