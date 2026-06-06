@@ -60,7 +60,7 @@ namespace Siro
         // 斷線時自動切 thinking 表情（GAPS.md #9 降級路徑 UX）
         // v0.2：bridge 回傳的 expression_id 是 thinking 對應的 exp_06
         // 這裡寫死是因為「斷線狀態」不需要 persona 客製 — 用通用 exp_06
-        private const string THINKING_EXPRESSION_ID = "exp_06";
+        private const string THINKING_EXPRESSION_ID = "exp_01";
 
         private void HandleBridgeDisconnected()
         {
