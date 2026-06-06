@@ -90,6 +90,16 @@ namespace Siro
         [Tooltip("加 ±5% 隨機微擾動（避免完美週期、像機器呼吸）")]
         public bool breathingAddJitter = true;
 
+        [Tooltip("v1.2+ 自動隱藏瞳孔（動畫眨眼時）— 解決「閉眼但瞳孔露出」恐怖感。\n" +
+                 "每幀讀 ParamEyeLOpen/ROpen、兩眼都低於 hidePupilsThreshold 時藏眼球 mesh。\n" +
+                 "搭配 mtn_01 等含眨眼的 idle 動畫必開。預設 true。\n" +
+                 "如果 persona 眼睛畫風沒這問題、可以關掉省一點 CPU。")]
+        public bool hidePupilsOnBlink = true;
+        [Tooltip("Open 模式閾值：eye-open 參數低於此值視為「閉眼」。\n" +
+                 "Open 模式：1=全開, 0=全閉（建議 0.1~0.3）。\n" +
+                 "Close 模式：自動用 1-threshold 當閾值（0 = 全開, 1 = 全閉）。")]
+        public float hidePupilsThreshold = 0.2f;
+
         // 跑 blink / breathing / headSway 的 coroutine handle
         private Coroutine _blinkCoroutine;
         private Coroutine _breathingCoroutine;
@@ -323,6 +333,51 @@ namespace Siro
                 );
             }
         }
+
+        /// <summary>
+        /// v1.2+：每幀檢查眼皮參數、決定是否隱藏瞳孔 mesh。
+        /// 解決 Mao 動畫眨眼時「閉眼但瞳孔露出」的恐怖感。
+        ///
+        /// 用 LateUpdate（不是 Update）是因為動畫 / expression blend
+        /// 都在 Update 階段寫入 ParamEyeLOpen/ROpen，
+        /// LateUpdate 在它們之後跑、才能讀到最新值。
+        ///
+        /// 隱藏條件（OR 邏輯）：
+        ///   - 當前 expression 在 hideEyeOnExpressions 清單（exp_02/03 等）
+        ///   - 兩眼 eye-open 參數都低於 hidePupilsThreshold
+        ///     （Open 模式：1=開 0=閉；Close 模式：0=開 1=閉、用 1-threshold 反向比對）
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!hidePupilsOnBlink) return;
+            if (_eyeRenderers == null || _eyeRenderers.Length == 0) return;
+            // 沒抓到 eye 參數就沒辦法偵測、跳過（維持 SetExpression 設定的可見性）
+            bool hasOpen = (_eyeLOpenParam != null && _eyeROpenParam != null);
+            bool hasClose = (_eyeLCloseParam != null && _eyeRCloseParam != null);
+            if (!hasOpen && !hasClose) return;
+
+            // 條件 1: expression 強制隱藏（exp_02/03 等）
+            bool hideForExpression = ShouldHideEyeFor(_currentExpressionId);
+
+            // 條件 2: 兩眼都閉
+            bool hideForBlink;
+            if (hasOpen)
+            {
+                float lOpen = GetCubismEyeParamValue(_eyeLOpenParam);
+                float rOpen = GetCubismEyeParamValue(_eyeROpenParam);
+                hideForBlink = (lOpen < hidePupilsThreshold && rOpen < hidePupilsThreshold);
+            }
+            else
+            {
+                // Close 模式：1=全閉。0.2 對應 0.8 為「閉眼」閾值
+                float closeThreshold = 1f - hidePupilsThreshold;
+                float lClose = GetCubismEyeParamValue(_eyeLCloseParam);
+                float rClose = GetCubismEyeParamValue(_eyeRCloseParam);
+                hideForBlink = (lClose > closeThreshold && rClose > closeThreshold);
+            }
+
+            SetEyeRenderersVisible(!(hideForExpression || hideForBlink));
+        }
 #else
         // 沒 SDK 時的占位 Awake，用來 log 提醒
         private void Awake()
@@ -503,35 +558,9 @@ namespace Siro
                 return;
             }
 
-            // v1.2+：優先用 CubismMotionController（.fade 跟 .anim 都能播、Cubism 官方路徑）
-            // 之前 commit 1c7d8a6 把這拿掉是錯的、只是避開「無 motion controller」warning
-            // 正確解法是 CubismMotionController 沒時才掉 Unity Animation
-#if SIRO_HAS_CUBISM
-            if (_motionController != null)
-            {
-                try
-                {
-                    _motionController.PlayAnimation(
-                        clip,
-                        layerIndex: 0,
-                        priority: priority,
-                        isLoop: isLoop,
-                        speed: 1.0f
-                    );
-                    if (verboseLogging) Debug.Log(
-                        $"[Live2DModelController] PlayMotion: {clip.name} (Cubism, loop={isLoop})"
-                    );
-                    return;
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[Live2DModelController] Cubism PlayMotion 失敗: {e.Message}");
-                }
-            }
-#endif
-
-            // 路徑 2: Unity Animation component（沒 CubismMotionController 時 fallback）
-            // 只支援 Legacy .anim（Generic 會有 warning、但還是能播）
+            // v1.2+：優先用 Unity Animation component（簡單、可靠、不依賴 Cubism layer 設定）
+            // Generic .anim 會有 warning（建議 Legacy）、但還是能播
+            // CubismMotionController 移到 fallback：適合 .fade 或已配 motion layer 的 .anim
             if (_unityAnimation == null)
             {
                 _unityAnimation = GetComponent<Animation>();
@@ -552,8 +581,40 @@ namespace Siro
             _unityAnimation.wrapMode = isLoop ? WrapMode.Loop : WrapMode.Once;
             _unityAnimation.Play();
             if (verboseLogging) Debug.Log(
-                $"[Live2DModelController] PlayMotion: {clip.name} (Unity Animation fallback, loop={isLoop})"
+                $"[Live2DModelController] PlayMotion: {clip.name} (Unity Animation, loop={isLoop})"
             );
+            return;
+
+            // 路徑 2: CubismMotionController fallback（opt-in 給 .fade 場景用）
+            // 預設不編譯，避免 CS0162 unreachable code warning
+            // 啟用方式：Project Settings → Player → Other Settings → Scripting Define Symbols
+            //   加 `SIRO_USE_CUBISM_MOTION_FALLBACK`（需搭配 SIRO_HAS_CUBISM）
+            // 注意：Mao 的 mtn_01.anim 是 Unity Animation 格式、不是 Cubism native motion
+            //       強行走 Cubism 會 fail silently（"can't start motion."）
+            //       這個 fallback 主要是給 .fade 檔案用的（需要 CubismMotionController + motion layer 配好）
+#if SIRO_HAS_CUBISM && SIRO_USE_CUBISM_MOTION_FALLBACK
+            if (_motionController != null)
+            {
+                try
+                {
+                    _motionController.PlayAnimation(
+                        clip,
+                        layerIndex: 0,
+                        priority: priority,
+                        isLoop: isLoop,
+                        speed: 1.0f
+                    );
+                    if (verboseLogging) Debug.Log(
+                        $"[Live2DModelController] PlayMotion: {clip.name} (Cubism fallback, loop={isLoop})"
+                    );
+                    return;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[Live2DModelController] Cubism PlayMotion 失敗: {e.Message}");
+                }
+            }
+#endif
         }
 
         /// <summary>
@@ -837,6 +898,36 @@ namespace Siro
                 );
                 _eyeParamSetterLogged = true;
             }
+        }
+
+        /// <summary>
+        /// v1.2+ 透過 reflection 讀 Cubism eye 參數值（給 LateUpdate 隱藏瞳孔用）
+        /// 跟 SetCubismEyeParam 一樣、同時試 property (.Value) 跟 field (.Value)
+        /// param 為 null 或讀失敗 → 回傳 1f（預設開眼、不隱藏）
+        /// </summary>
+        private float GetCubismEyeParamValue(UnityEngine.Object param)
+        {
+            if (param == null) return 1f;
+            var paramType = param.GetType();
+
+            // 1. 試 property
+            var prop = paramType.GetProperty("Value");
+            if (prop != null && prop.CanRead)
+            {
+                try { return System.Convert.ToSingle(prop.GetValue(param)); }
+                catch { /* fall through to field */ }
+            }
+
+            // 2. 試 field
+            var field = paramType.GetField("Value",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (field != null)
+            {
+                try { return System.Convert.ToSingle(field.GetValue(param)); }
+                catch { /* fall through */ }
+            }
+
+            return 1f;  // 讀不到 = 預設開
         }
 
         // v1.2+ AnimateEyeParam 已經改成 snap 模式、不需要 lerp 版本

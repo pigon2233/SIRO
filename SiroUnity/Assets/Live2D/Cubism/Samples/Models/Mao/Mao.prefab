@@ -44478,13 +44478,9 @@ GameObject:
   - component: {fileID: 6579579175433959712}
   - component: {fileID: 5742597370366567059}
   - component: {fileID: 6757507206410832609}
-  - component: {fileID: 5348942631172909053}
-  - component: {fileID: 5497049125416639292}
   - component: {fileID: 6829035977109871955}
   - component: {fileID: 483296908792624464}
   - component: {fileID: 3131998051595424282}
-  - component: {fileID: 3615842196355568567}
-  - component: {fileID: 7380262395440072946}
   - component: {fileID: 2299037628434023210}
   m_Layer: 0
   m_Name: Mao
@@ -45511,37 +45507,6 @@ MonoBehaviour:
     Gravity: {x: 0, y: -1}
     Wind: {x: 0, y: 0}
     Fps: 30
---- !u!114 &5348942631172909053
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8890699974960601345}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bbb4207470631a9479a130aaefe23015, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Siro.Live2DModelController
-  verboseLogging: 1
-  hideEyeOnExpressions:
-  - exp_02
-  - exp_03
-  eyeDrawableIndices: 570000005c000000
---- !u!114 &5497049125416639292
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8890699974960601345}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7f25488d90f863e45a99ad2c8f772285, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Siro.EmotionDisplay
-  bridgeClient: {fileID: 0}
-  verboseLogging: 1
 --- !u!114 &6829035977109871955
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -45555,9 +45520,27 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Siro.Live2DModelController
   verboseLogging: 1
+  idleMotion: {fileID: 0}
+  autoPlayIdle: 1
   hideEyeOnExpressions:
   - exp_02
   - exp_03
+  clickable: 1
+  blendLockDuration: 0.4
+  enableBlinking: 1
+  blinkMinInterval: 3
+  blinkMaxInterval: 7
+  blinkDuration: 0.2
+  enableBreathingFallback: 1
+  breathingAmplitude: 0.015
+  breathingPeriod: 4
+  breathingAddJitter: 1
+  hidePupilsOnBlink: 1
+  hidePupilsThreshold: 0.2
+  enableHeadSway: 1
+  headSwayAngle: 5
+  headSwayMinInterval: 4
+  headSwayMaxInterval: 8
   eyeDrawableIndices: 570000005c000000
 --- !u!114 &483296908792624464
 MonoBehaviour:
@@ -45589,37 +45572,6 @@ MonoBehaviour:
   tint: {r: 1, g: 1, b: 1, a: 1}
   bindOnAwake: 1
   includeChildren: 1
---- !u!114 &3615842196355568567
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8890699974960601345}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bbb4207470631a9479a130aaefe23015, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Siro.Live2DModelController
-  verboseLogging: 1
-  hideEyeOnExpressions:
-  - exp_02
-  - exp_03
-  eyeDrawableIndices: 570000005c000000
---- !u!114 &7380262395440072946
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8890699974960601345}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7f25488d90f863e45a99ad2c8f772285, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Siro.EmotionDisplay
-  bridgeClient: {fileID: 0}
-  verboseLogging: 1
 --- !u!114 &2299037628434023210
 MonoBehaviour:
   m_ObjectHideFlags: 0
