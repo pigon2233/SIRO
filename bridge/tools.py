@@ -45,7 +45,9 @@ SET_MOOD_TOOL: Dict[str, Any] = {
                     "proud",      # exp_03 驕傲、得意
                     "excited",    # exp_04 興奮
                     "sad",        # exp_05 難過、失落
-                    "thinking",   # exp_06 思考、疑惑（借用害羞 expression）
+                    "thinking",   # exp_06 思考、疑惑 — 注意：Mao 沒有真正 thinking 表情、
+                                # 借用 exp_06 害羞臉。LLM 選 thinking 時 Mao 視覺會害羞，
+                                # 視為「不好意思回答 / 在想怎麼說」之類的語意。
                     "surprised",  # exp_07 驚訝、意外
                     "angry",      # exp_08 生氣、不滿
                     "neutral",    # 無對應 expression、fallback 到 default

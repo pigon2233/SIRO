@@ -13,7 +13,7 @@
     "exp_03": {"name": "proud", "description": "驕傲"},
     "exp_04": {"name": "excited", "description": "興奮"},
     "exp_05": {"name": "sad", "description": "難過"},
-    "exp_06": {"name": "thinking", "description": "害羞（借用為 thinking）"},
+    "exp_06": {"name": "thinking", "description": "害羞 / 不好意思（Mao 沒有真正 thinking 表情、借用此臉）"},
     "exp_07": {"name": "surprised", "description": "驚訝"},
     "exp_08": {"name": "angry", "description": "生氣"}
   },

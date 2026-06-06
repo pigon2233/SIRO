@@ -13,7 +13,7 @@ class Emotion(str, Enum):
     SAD = "sad"
     ANGRY = "angry"
     SURPRISED = "surprised"
-    THINKING = "thinking"
+    THINKING = "thinking"  # exp_06 實際是害羞臉（Mao 沒有真正 thinking 表情、借用此臉）
     EXCITED = "excited"
     JOYFUL = "joyful"      # 比 happy 更強的開心，哈哈大笑（exp_02）
     PROUD = "proud"        # 驕傲、得意（exp_03）
