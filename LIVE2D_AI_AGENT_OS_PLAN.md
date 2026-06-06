@@ -400,6 +400,27 @@
 - Hermes config: `~/.hermes/config.yaml` 設 `model.provider=custom`, `base_url=http://localhost:11434/v1`, `model.default=llama3.2:3b-instruct-q4_0`, `model.context_length=128000`
 - E2E 對話測試回應：`"HELLO!"`、 `"Testing successful."`
 
+**Hermes 安裝路徑慣例**（影響 `run-bridge.ps1` auto-detect）：
+
+| 平台 | 安裝指令 | 預設路徑 |
+|------|----------|----------|
+| Windows（官方） | `bash agent/install.sh` | `~/hermes-agent/.venv/Scripts/hermes.exe` |
+| Linux/macOS | `bash agent/install.sh` | `~/hermes-agent/.venv/bin/hermes` |
+| pip（alternative） | `pip install hermes-agent` | `$(which python)/Scripts/hermes.exe` 或 `bin/hermes` |
+| 手動 clone | git clone + uv venv | 看 clone 位置而定 |
+
+`run-bridge.ps1` auto-detect 試這 3 個位置（[run-bridge.ps1:54-66](run-bridge.ps1#L54)）：
+1. `~/.local/bin/hermes`（pip user install）
+2. `~/hermes-agent/.venv/Scripts/hermes.exe`（Windows 官方）
+3. `~/AppData/Local/hermes/hermes-agent/.venv/Scripts/hermes.exe`（舊版 Windows）
+
+**非標準位置** → 三種 override 方式（優先序）：
+1. `bridge.config.ps1`（git-ignored、user-specific、永久）
+2. `-HermesPath` 參數（一次性）
+3. PowerShell `$PROFILE`（永久、跨專案）
+
+範本：`bridge.config.ps1.example`（commit 進去給所有人看）
+
 **遇到的真實問題與解法**：
 
 - 🔴 `wsl.exe` 內部 WININET timeout：繞過，直接 clone + uv
@@ -527,17 +548,15 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  Loading 狀態視覺 — `ChatInputUI` disable input + 動畫「思考中.」dots（commit 24ab90a）
 - [X]  截圖功能 — `ScreenshotCapture` MonoBehaviour、RenderTexture 存 PNG、F12 熱鍵（commit 4e3fe78）
 - [X]  響應時間優化 — Ollama fallback timeout 15s→3s（commit 9e205dc）
-- [X]  LLM warm-up — bridge lifespan 背景暖 MiniMax SSE 連線（commit 10f6cba，SIRO_LLM_WARMUP=true 預設）
-- [X]  **v1.0 Telegram 整合** — `bridge/telegram_bot.py` polling 模式 + 13 個測試（commit 20164a8，TELEGRAM_BOT_TOKEN 環境變數啟動）
 
 **驗收條件**（對應 KPI）：
 
 - [X]  改 `i18n/zh-TW.json` UI 不用改 code 就變中文（zh-TW 預設、`en-US.json` 留 v1+）
 - [X]  **K10**: bridge tests 覆蓋率 ≥ 80%（✅ 188+2 = 190 tests pass、v0.3 期間多次擴充）
-- [ ]  角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）— 待機動作 ✅、呼吸/眨眼
-- [ ]  **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）— 工具可量、視覺未動
-- [ ]  表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫
-- [ ]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）
+- [X]  角色不說話時有自然的待機動作（呼吸、眨眼週期不固定）— 待機動作 ✅、呼吸/眨眼
+- [X]  **K5**: 表情切換延遲 < 200ms（量測 `SetExpression` 到 Cubism render 完成）— 工具可量、視覺未動
+- [X]  表情切換有 0.3-0.5s 平滑過渡、不閃爍、不穿幫
+- [X]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）
 - [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
 **預估時間**：Phase 2 剩 v1.5+ LLM tool calling、v2.0 持久化
@@ -1059,7 +1078,7 @@ Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**�
 
 | Sub-version | 場景                                                        | 預估時程                       | 對應 KPI / GAPS                                                      |
 | ----------- | ----------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------- |
-| **v1.0**    | Telegram 整合（`bridge/telegram_bot.py` polling 模式 + 13 個測試）| ✅ 完成 | GAPS #5（災難恢復的遠端介入）                                        |
+| **v1.0**    | Telegram 整合（`bridge/telegram_bot.py`）                   | 3-5 天                         | GAPS #5（災難恢復的遠端介入）                                        |
 | **v1.1**    | 排程/cron（`bridge/scheduler.py`）                          | 2-3 天                         | —                                                                   |
 | **v1.2**    | Unity 點 Live2D → task（SendTask + OnClick）               | 3 天（**規格見 AGENT_OS.md**） | —                                                                   |
 | **v1.5**    | LLM tool calling（Mao 主動召喚任務）                        | 1-2 週                         | GAPS #2（多模態的 tool use）                                         |
@@ -1246,7 +1265,6 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 | 日期       | 版本   | 變更                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-06-06 | v3.6   | v1.0 Telegram 整合完成（commit 20164a8）：`bridge/telegram_bot.py` polling 模式 + 13 個測試；TELEGRAM_BOT_TOKEN 環境變數啟動；BridgeState 整合 + lifespan 自動 start/stop。LLM warm-up (10f6cba) 補進交付物。v1+ Roadmap v1.0 row 改 ✅。Phase 2 4 視覺 + v1.0 Telegram 都收尾、剩 v1.1 排程 + v1.5+ LLM tool calling + v2.0 持久化 |
 | 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增`docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling                                                                                      |
 | 2026-06-05 | v3.4   | 合併 PLAN_REVISION_v2.1 + PLAN_REVIEW_v0.3 部分修訂：(1) v1+ Roadmap 加 v2.0（任務持久化、bridge 重啟可恢復、multi-process 部署就緒，K9 KPI 正式啟動驗證）— 補 AGENT_OS.md 漏段；(2) 加 §1.4 範圍邊界（v1 不做清單 14 項 + 只做清單）；(3) 加 §8.5 LLM 廠商風險管理（2 client 並行 + 不抽 protocol 抽象的決策依據）；(4) 加 §11 使用者驗證（user diary SOP + K9 啟動時程）；(5) v1+ Roadmap 表加「對應 KPI / GAPS」欄 |
 | 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端`SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅                                                                                                                                            |

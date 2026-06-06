@@ -63,6 +63,13 @@ if (-not $env:PYTHONPATH) {
     $env:PYTHONPATH = $ScriptDir
 }
 
+# Load user-specific config if exists (git-ignored)
+$userConfig = Join-Path $ScriptDir "bridge.config.ps1"
+if (Test-Path $userConfig) {
+    . $userConfig
+    Write-Host "  Loaded: bridge.config.ps1 (user-specific overrides)" -ForegroundColor DarkGray
+}
+
 # Print config banner
 $streamingColor = if ($env:SIRO_STREAMING -eq "true") { "Green" } else { "Yellow" }
 $agentOSColor = if ($env:SIRO_USE_AGENT_OS -eq "true") { "Green" } else { "Yellow" }
@@ -93,6 +100,30 @@ Write-Host "  HERMES_TIMEOUT:    $timeoutValue" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
+
+# If hermes not found, print helpful setup instructions (not fatal -
+# MiniMax SSE can serve as primary LLM)
+if (-not $env:HERMES_BIN_PATH) {
+    Write-Host "================================================================" -ForegroundColor Yellow
+    Write-Host "  WARNING: HERMES_BIN_PATH not set / not auto-detected" -ForegroundColor Yellow
+    Write-Host "================================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Bridge will start, but Hermes-backed LLM calls will fail." -ForegroundColor Yellow
+    Write-Host "  If you use MiniMax-M3 SSE streaming (default), this is OK." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  To install Hermes, run:" -ForegroundColor White
+    Write-Host "    bash agent/install.sh" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  To use a custom install path, either:" -ForegroundColor White
+    Write-Host "    1. Pass to this script:    .\run-bridge.ps1 -HermesPath 'D:\hermes\hermes.exe'" -ForegroundColor Cyan
+    Write-Host "    2. Set in user config:     cp bridge.config.ps1.example bridge.config.ps1" -ForegroundColor Cyan
+    Write-Host "                                # then edit and uncomment HERMES_BIN_PATH" -ForegroundColor Cyan
+    Write-Host "    3. Set in your PowerShell profile (permanent):" -ForegroundColor Cyan
+    Write-Host "       notepad \$PROFILE   # add:  \$env:HERMES_BIN_PATH = 'D:\hermes\hermes.exe'" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "================================================================" -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # Launch bridge
 python -m bridge.main

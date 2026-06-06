@@ -1,0 +1,45 @@
+# bridge.config.ps1.example - User-specific bridge config template
+#
+# Purpose:
+#   Override run-bridge.ps1 defaults for non-standard setups
+#   (custom hermes install location, custom port, etc.)
+#
+# Usage:
+#   1. Copy this file:  cp bridge.config.ps1.example bridge.config.ps1
+#   2. Edit bridge.config.ps1 with your values
+#   3. run-bridge.ps1 auto-detects bridge.config.ps1 in project root
+#
+# Note: bridge.config.ps1 is git-ignored (user-specific)
+#       bridge.config.ps1.example is committed (template for everyone)
+
+# ============================================================
+# Hermes CLI binary location
+# ============================================================
+# Default auto-detect tries:
+#   - $HOME\.local\bin\hermes
+#   - $HOME\hermes-agent\.venv\Scripts\hermes.exe
+#   - $HOME\AppData\Local\hermes\hermes-agent\.venv\Scripts\hermes.exe
+#
+# If your install is in a non-standard location, set it here:
+# $env:HERMES_BIN_PATH = "D:\tools\hermes\hermes.exe"
+
+# ============================================================
+# Hermes LLM call timeout (seconds)
+# ============================================================
+# Default: 180
+# Increase if you have slow LLM (large model, CPU-only, etc.)
+# $env:HERMES_TIMEOUT = "300"
+
+# ============================================================
+# Bridge port
+# ============================================================
+# Default: 8001
+# Change if you have port conflict
+# $env:BRIDGE_PORT = "8002"
+
+# ============================================================
+# SIRO flags (advanced)
+# ============================================================
+# Set to "false" to disable
+# $env:SIRO_STREAMING = "true"        # SSE streaming (TTFT < 5s)
+# $env:SIRO_USE_AGENT_OS = "true"     # v0.4+ default ON

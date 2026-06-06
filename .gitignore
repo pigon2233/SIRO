@@ -117,3 +117,6 @@ $RECYCLE.BIN/
 *~
 *.bak
 *.orig
+
+# User-specific bridge config (template is bridge.config.ps1.example)
+bridge.config.ps1
