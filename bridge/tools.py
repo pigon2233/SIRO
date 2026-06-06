@@ -84,6 +84,60 @@ SET_MOOD_TOOL: Dict[str, Any] = {
 
 
 # ============================================================
+# v1.5+ 第二個 tool：play_motion
+# ============================================================
+
+PLAY_MOTION_TOOL: Dict[str, Any] = {
+    "name": "play_motion",
+    "description": (
+        "Trigger a Mao body/face motion animation. "
+        "Use SPARINGLY — not every response needs a motion. "
+        "Reserve for: emphasis (e.g., nodding along to a point), "
+        "reactions (e.g., surprised jump), greetings (e.g., wave), "
+        "or special moments (e.g., victory animation after good news). "
+        "For routine text responses, do NOT call this tool — just respond with text."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "motion_group": {
+                "type": "string",
+                "enum": [
+                    "mtn_02",        # 短動作 1
+                    "mtn_03",        # 短動作 2
+                    "mtn_04",        # 短動作 3
+                    "sample_01",     # gesture 範例
+                    "special_01",    # 特殊動作 1
+                    "special_02",    # 特殊動作 2
+                    "special_03",    # 特殊動作 3
+                ],
+                "description": (
+                    "Mao motion group name. "
+                    "mtn_02-04 are short reaction motions (~2-3s). "
+                    "sample_01 is a gesture example. "
+                    "special_01-03 are longer special actions. "
+                    "Note: mtn_01 is the idle breathing motion and runs automatically — do NOT trigger it."
+                ),
+            },
+            "motion_index": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0,
+                "description": (
+                    "Index within the motion group. Most groups only have one motion, so 0 is the safe default."
+                ),
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why this motion fits (for logging/debug).",
+            },
+        },
+        "required": ["motion_group"],
+    },
+}
+
+
+# ============================================================
 # Tool registry
 # ============================================================
 
@@ -91,7 +145,7 @@ SET_MOOD_TOOL: Dict[str, Any] = {
 # 當 LLM 回 tool_use 時、bridge 查表決定 invoke 哪個 SendTask
 TOOL_TO_TASK: Dict[str, str] = {
     "set_mood": "mood.set",
-    # "play_motion": "motion.play",     # v1.5+ 待加
+    "play_motion": "motion.play",
     # "switch_persona": "persona.switch",
 }
 
@@ -104,7 +158,7 @@ def get_available_tools() -> List[Dict[str, Any]]:
     為什麼是 list：Anthropic API tools 是 list of tools（可多個同時提供）
     未來 v1.5+ 加新 tool 只要在這裡加、TOOL_TO_TASK 也加一筆
     """
-    return [SET_MOOD_TOOL]
+    return [SET_MOOD_TOOL, PLAY_MOTION_TOOL]
 
 
 def get_tool_by_name(name: str) -> Dict[str, Any] | None:

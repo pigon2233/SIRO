@@ -85,6 +85,20 @@ namespace Siro
     }
 
     /// <summary>
+    /// v1.5+ LLM tool calling 觸發的 motion 播放訊息
+    /// bridge 端 LLM 透過 play_motion tool 決定觸發某個 motion、
+    /// 推 {"type":"motion_play","motion_group":"mtn_02","motion_index":0} 給 Unity
+    /// Unity 收到後呼叫 Live2DModelController.PlayMotion(group, index, isLoop=false)
+    /// </summary>
+    [Serializable]
+    public class BridgeMotionPlay
+    {
+        public string type;         // 永遠 "motion_play"
+        public string motion_group; // Cubism motion 群組名（如 "mtn_02"）
+        public int motion_index;    // 群組內 motion 編號（預設 0）
+    }
+
+    /// <summary>
     /// v1.2 SendTask result
     /// bridge 端 task 成功完成時推 {"type":"task_result","task_id":"...","result":{...}}
     /// Unity 端 SendTaskAsync 內部 await 這個、訂閱 OnTaskResult 自己收
@@ -162,6 +176,7 @@ namespace Siro
         public event Action<BridgeDelta> OnBridgeDelta;   // v0.3.1 SSE streaming（每個 chunk 觸發）
         public event Action<BridgeTaskResult> OnTaskResult;  // v1.2 SendTask 成功
         public event Action<BridgeTaskFailed> OnTaskFailed;  // v1.2 SendTask 失敗
+        public event Action<BridgeMotionPlay> OnBridgeMotionPlay;  // v1.5+ LLM play_motion tool
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
         public event Action<int> OnReconnectAttempt;  // 參數：第 N 次嘗試
@@ -573,6 +588,18 @@ namespace Siro
                         // v1.2 SendTask：bridge 已收下 task、進 registry
                         // SendTaskAsync 本身不等 ack（直接等 result），所以這裡只給訂閱者 log
                         if (verboseLogging) Debug.Log($"[HermesBridge] task_ack: {j["task_id"]}");
+                        break;
+
+                    case "motion_play":
+                        // v1.5+ LLM tool calling 觸發 motion 播放
+                        // bridge 端 LLM 透過 play_motion tool 決定要播哪個 motion、
+                        // 推 {"type":"motion_play","motion_group":"...","motion_index":N} 給 Unity
+                        // Unity 訂閱 OnBridgeMotionPlay 處理（Live2DModelController 訂閱 → 呼叫 PlayMotion）
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] motion_play: {j["motion_group"]}[{j["motion_index"]}]"
+                        );
+                        var motionPlay = j.ToObject<BridgeMotionPlay>();
+                        OnBridgeMotionPlay?.Invoke(motionPlay);
                         break;
 
                     case "task_result":

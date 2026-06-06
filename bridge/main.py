@@ -1018,6 +1018,34 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
             emotion_str = tool_use_event.input.get("emotion", "neutral")
             intensity = float(tool_use_event.input.get("intensity", 0.7))
             logger.info(f"⏱ [ws] tool_use 選 emotion={emotion_str} intensity={intensity}")
+        elif tool_use_event and tool_use_event.name == "play_motion":
+            # v1.5+ play_motion tool：LLM 想觸發 body motion
+            # emotion 用 regex parse（因為 LLM 沒設 emotion、預設中性）
+            clean_text, emotion, intensity = parser.parse(full_text, user_input=message)
+            emotion_str = emotion.value
+            logger.info(f"⏱ [ws] tool_use=play_motion、emotion fallback regex: emotion={emotion_str}")
+
+            # Invoke motion.play task handler
+            # task 會自己 log + 推 WS event 給 Unity（見 bridge/tasks/builtin.py:165）
+            motion_handler = get_task("motion.play")
+            if motion_handler is not None:
+                try:
+                    await motion_handler(
+                        tool_use_event.input,
+                        {
+                            "state": state,
+                            "user_id": user_id,
+                            "task_id": f"tool-{uuid.uuid4().hex[:8]}",
+                            "websocket": websocket,
+                        }
+                    )
+                    logger.info(
+                        f"⏱ [ws] play_motion 觸發: {tool_use_event.input.get('motion_group')}[{tool_use_event.input.get('motion_index', 0)}]"
+                    )
+                except Exception as e:
+                    logger.warning(f"[ws] play_motion task 失敗: {e}")
+            else:
+                logger.warning("[ws] motion.play task 沒註冊、跳過")
         else:
             # Fallback：regex parse [emotion:xxx] 文字
             clean_text, emotion, intensity = parser.parse(full_text, user_input=message)

@@ -164,18 +164,21 @@ async def mood_set(args: dict, ctx: dict) -> dict:
 
 async def motion_play(args: dict, ctx: dict) -> dict:
     """
-    記錄 motion 觸發（v1.2 不直接驅動 Unity，bridge 只 log/記錄）
+    v1.5+：bridge 推 motion event 給 Unity、Unity 端 Live2DModelController.PlayMotion() 執行
 
-    v1.5+ 預期：bridge 推 motion event 到 Unity event bus、Unity 訂閱執行
-    v1.2 MVP：先 log + 存 state 給 debug 看
+    行為：
+    1. 記錄到 state.last_motion（給 debug 看）
+    2. 透過 ctx["websocket"] 推 {"type": "motion_play", "motion_group": "...", "motion_index": N}
+       給 Unity、Unity handler 呼叫 PlayMotion(group, index, isLoop=false)
 
     Args:
-        args: {"motion_group": "Idle", "motion_index": 0}
+        args: {"motion_group": "mtn_02", "motion_index": 0, "reason": "..."}
     Returns:
         {"ok": True, "motion": {"motion_group": "...", "motion_index": 0}}
     """
     motion_group = args.get("motion_group")
     motion_index = args.get("motion_index", 0)
+    reason = args.get("reason", "")
 
     if not motion_group:
         raise ValueError("motion.play: missing required arg 'motion_group'")
@@ -188,6 +191,7 @@ async def motion_play(args: dict, ctx: dict) -> dict:
         "task_id": ctx["task_id"],
         "motion_group": motion_group,
         "motion_index": int(motion_index),
+        "reason": reason,
         "at": time.time(),
     })
     # 只留最近 50 個、避免無限制長大
@@ -195,8 +199,24 @@ async def motion_play(args: dict, ctx: dict) -> dict:
 
     logger.info(
         f"[motion.play] user={ctx['user_id']} → "
-        f"{motion_group}[{motion_index}]"
+        f"{motion_group}[{motion_index}]{(' reason=' + reason) if reason else ''}"
     )
+
+    # v1.5+：推 motion event 給 Unity
+    # 跟 mood.set 同樣 pattern：透過 ctx["websocket"] 送、Unity 端 handler 接到後播放
+    # 失敗只 log warning、不 raise（motion 是 side effect、不應破壞主 task）
+    if "websocket" in ctx and ctx["websocket"] is not None:
+        try:
+            await ctx["websocket"].send_json({
+                "type": "motion_play",
+                "motion_group": motion_group,
+                "motion_index": int(motion_index),
+            })
+        except Exception as e:
+            logger.warning(f"[motion.play] 推 WS event 給 Unity 失敗: {e}")
+    else:
+        logger.warning("[motion.play] ctx 沒 websocket、跳過推 WS event（測試或離線環境？）")
+
     return {
         "ok": True,
         "motion": {

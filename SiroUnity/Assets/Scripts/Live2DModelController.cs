@@ -42,6 +42,23 @@ namespace Siro
                  "沒設的話 enableBreathingFallback 會用 scale 模擬呼吸。\n" +
                  "v0.2+ 可由 persona YAML 的 idle_motions 覆寫（待 v1 擴充）。")]
         public AnimationClip idleMotion;
+
+        [System.Serializable]
+        public class NamedMotionClip
+        {
+            [Tooltip("Motion group name（對應 Cubism 裡的 .anim 檔名、不含副檔名）\n" +
+                     "Mao 預設 mtn_01~04、sample_01、special_01~03")]
+            public string groupName;
+            [Tooltip("對應的 .anim AnimationClip（從 Assets/Live2D/.../motions/ 拖入）")]
+            public AnimationClip clip;
+        }
+
+        [Header("v1.5+ Motion Group Mapping（play_motion tool 用）")]
+        [Tooltip("Motion group name → AnimationClip 對照表\n" +
+                 "給 LLM 透過 play_motion tool 選 motion 用、Unity Animation 自動播\n" +
+                 "例如 [{groupName:\"mtn_02\", clip: mtn_02.anim}, {groupName:\"special_01\", clip: special_01.anim}]\n" +
+                 "v0.2+ 原本用 CubismFadeMotionList、但 v1.2+ 我們走 Unity Animation 路徑更簡單可靠")]
+        public System.Collections.Generic.List<NamedMotionClip> motionClips = new System.Collections.Generic.List<NamedMotionClip>();
         [Tooltip("Start 自動播放 idle")]
         public bool autoPlayIdle = true;
 
@@ -332,6 +349,26 @@ namespace Siro
                     $"[Live2DModelController] 頭部晃動 coroutine 啟動 (angle=±{headSwayAngle}°, interval={headSwayMinInterval}-{headSwayMaxInterval}s)"
                 );
             }
+
+            // v1.5+：訂閱 bridge 的 OnBridgeMotionPlay、LLM 透過 play_motion tool 觸發
+            // 找 bridge（同 GameObject / 同 parent / 全場景）
+            HermesBridgeClient bridgeClient =
+                GetComponent<HermesBridgeClient>()
+                ?? GetComponentInParent<HermesBridgeClient>()
+                ?? FindFirstObjectByType<HermesBridgeClient>();
+            if (bridgeClient != null)
+            {
+                bridgeClient.OnBridgeMotionPlay += HandleBridgeMotionPlay;
+                if (verboseLogging) Debug.Log(
+                    "[Live2DModelController] 已訂閱 OnBridgeMotionPlay（v1.5+ LLM play_motion tool）"
+                );
+            }
+            else if (verboseLogging)
+            {
+                Debug.Log(
+                    "[Live2DModelController] 找不到 HermesBridgeClient、跳過 OnBridgeMotionPlay 訂閱"
+                );
+            }
         }
 
         /// <summary>
@@ -427,6 +464,56 @@ namespace Siro
         /// 沒設過 expression 就回空字串
         /// </summary>
         public string GetCurrentExpressionId() => _currentExpressionId;
+
+        /// <summary>
+        /// v1.5+：bridge 推 motion_play 事件過來時的 handler
+        /// LLM 透過 play_motion tool 決定要播的 motion、我們查 motionClips mapping 拿 .anim 然後播
+        /// isLoop = false（一次性動作、播完回到 idle 呼吸）
+        /// </summary>
+        private void HandleBridgeMotionPlay(HermesBridgeClient.BridgeMotionPlay msg)
+        {
+            if (msg == null || string.IsNullOrEmpty(msg.motion_group))
+            {
+                Debug.LogWarning("[Live2DModelController] motion_play 訊息沒 group、忽略");
+                return;
+            }
+            if (verboseLogging)
+            {
+                Debug.Log(
+                    $"[Live2DModelController] 收到 motion_play: {msg.motion_group}[{msg.motion_index}]"
+                );
+            }
+
+            // 查 motionClips mapping（Inspector 設定 group name → .anim 對照）
+            if (motionClips == null || motionClips.Count == 0)
+            {
+                Debug.LogWarning(
+                    "[Live2DModelController] motionClips 為空、無法播放 " +
+                    $"motion '{msg.motion_group}'。請在 Inspector 配 motion group → AnimationClip 對照表。"
+                );
+                return;
+            }
+            AnimationClip targetClip = null;
+            foreach (var named in motionClips)
+            {
+                if (named != null && named.groupName == msg.motion_group)
+                {
+                    targetClip = named.clip;
+                    break;
+                }
+            }
+            if (targetClip == null)
+            {
+                Debug.LogWarning(
+                    $"[Live2DModelController] motion_group '{msg.motion_group}' 沒配 AnimationClip、忽略"
+                );
+                return;
+            }
+
+            // 走 Unity Animation 路徑（簡單可靠、v1.2+ 已實作）
+            // isLoop = false（一次性動作、播完回到 idle 呼吸由 Coroutine 或 Cubism 自動接管）
+            PlayMotion(targetClip, isLoop: false, fadeInSeconds: 0.3f);
+        }
 
         /// <summary>
         /// 切換 expression。
