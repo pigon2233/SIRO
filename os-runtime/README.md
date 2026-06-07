@@ -7,12 +7,18 @@
 
 ## 當前狀態
 
-**v0.2.0 - Phase 3 前置作業完成**：
+**v0.3.0 - Phase 3 MVP 完成**（2026-06-08）：
 - ✅ gRPC 依賴 enable（tonic + prost + tonic-prost-build）
 - ✅ build.rs 從 `proto/siro.proto` 生成 Rust stubs
-- ✅ `src/grpc.rs` skeleton：所有 RPC 接到 stub、GetStatus + Health 簡單實作
-- ✅ chrono dep（給 health started_at 用）
-- ⏳ 實際 supervisor / hardware / kiosk 實作 → Phase 3 正式開始時
+- ✅ siro-runtime daemon：tokio + tonic + process supervisor + 8 個 RPC 全實作
+- ✅ siro-ctl CLI：6 個 subcommand（status / start / stop / restart / hardware / health）
+- ✅ EventBus + LogBus（tokio broadcast channel）給 stream_logs / subscribe_events 用
+- ✅ 11 個 unit tests（Rust + Python）全綠、cargo build 0 warning、cargo clippy 0 warning
+- ✅ memory 23.37 MB debug WS（< 30MB 達標）
+- ✅ K8 16ms PASS（< 3s 達標）
+- 🟡 K2 4.22s 本地 / 30.8s 雲端（< 2s 需 GPU 加速）
+
+詳細進度：見 [docs/CHANGELOG.md](../docs/CHANGELOG.md) 2026-06-08 entry。
 
 ---
 

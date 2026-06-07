@@ -10,7 +10,8 @@
 > - ✅ Phase 1 完成（2026-06-03 Unity Play 實測）
 > - ✅ Phase 1.5 / 1.75 完成（runtime 驗收過）
 > - 🟡 **Phase 2 進行中** — v0.4 完成（SIRO_USE_AGENT_OS 預設翻 true + 視覺設定檔 + K8 量化）、v0.4+ 完成（Unity incremental render，提前 v1+ 規劃做）
-> - ⏳ Phase 3 / 4 / 5 / 6 為規劃
+> - 🟡 **Phase 3 進行中** — v0.3.0 MVP 完成（2026-06-08、5/8 核心驗收 ✅、剩下 K2 需 GPU/小模型才 < 2s）
+> - ⏳ Phase 4 / 5 / 6 為規劃
 > - **v0.3.1 進度**：選 Q2 選項 B（hermes_client streaming shim + Unity 端 incremental render 都完成）
 
 > **重要 cross-ref**：
@@ -332,7 +333,7 @@
 - [X]  主計畫書（本檔，v3.0）
 - [X]  `docs/ARCHITECTURE.md`（v0.3 對齊、4 層架構、Layer 2 加 AgentOS + SSE streaming）
 - [X]  `docs/DECISIONS.md`（19 個決策 + #001 v0.2 streaming 觀察）
-- [X]  `os-runtime/` Rust workspace scaffold（Cargo.toml + crates + proto，**功能實作留 Phase 3**）
+- [X]  `os-runtime/` Rust workspace scaffold（Cargo.toml + crates + proto，Phase 3 已完成 v0.3.0 MVP）
 - [X]  `os/` Linux 設定目錄結構（10 子目錄、kiosk/systemd/monitoring/backup/security 有詳細規劃）
 - [X]  `hardware/` 硬體規格文件（assembly/audio/video/detection + 自動驗證腳本）
 - [X]  `docs/SECURITY.md`（v0.3 隱私路線圖）
@@ -345,7 +346,7 @@
 **驗收條件**：
 
 - [X]  所有文件互引一致（v0.3 期間修訂過 PLAN_REVIEW / PLAN_REVISION / SETUP / ARCHITECTURE / STATUS / AGENT_OS / DECISIONS / STRATEGIC_NOTES）
-- [ ]  `os-runtime/` 可以 `cargo build` 通過（**待 Phase 3**、scaffold 在但實作沒做）
+- [X]  `os-runtime/` 可以 `cargo build` 通過（2026-06-08 commit `91f6268`、0 warning / 0 error）
 - [X]  `bridge/` 可以 `python -m bridge.main` 啟動（v0.2+ 實測）
 
 **預估時間**：~1 週（v0.3 期間多次修訂）
