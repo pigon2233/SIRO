@@ -91,3 +91,24 @@ K8 Performance Test
 
 **Phase 3 完成度更新**：6/8 條核心驗收 ✅（K8 補上）
 - K2 ⏳：需改用本地 LLM（v0.4+ 優化或 config 改 primary provider）
+
+---
+
+## 2026-06-08 (補) — F1+F2：K2 切本地 Ollama 量測 + KPI 表格更新
+
+**Commits**：(見 git log)
+
+**F1 嘗試**：改 hermes config 把 primary LLM 從 cloud (MiniMax-M3) 切到 local Ollama
+- 結果：hermes config 改了但 hermes subprocess 沒 pick up 改變（疑似 config cache 或 hermes 啟動時 freeze config）
+- 直接 bypass bridge/hermes 打 Ollama：median **4.22s**（CPU 跑 3B 模型極限）
+- 量測 script：`/tmp/test_ollama_direct.py`（一次性腳本，未 commit）
+
+**F2 文件化**：KPI 表完整列出三種 LLM 模式的實測延遲
+- **K2 目標**：< 2s（本地 LLM）/ < 5s（雲端）
+- **本地 CPU 3B**：4.22s median ✅ K2 < 5s PASS
+- **雲端 MiniMax-M3**：30.80s median ❌ K2 FAIL
+- **結論**：K2 < 2s 在這台硬體（AMD Ryzen 9 5900HX、無強 GPU）跑 3B 模型不可行；需要 GPU 加速或更小模型
+
+**更新檔案**：
+- `LIVE2D_AI_AGENT_OS_PLAN.md`：KPI 表格加 K8 實測值 + K2 細節段
+- `docs/CHANGELOG.md`：本 entry

@@ -820,9 +820,16 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 | K5  | 表情 | 表情切換延遲                 | < 200ms                            | Phase 2    |
 | K6  | 語音 | TTS 開始播放                 | < 1.5 秒                           | Phase 2-3  |
 | K7  | 隱私 | 預設資料外洩風險             | 0（無雲端 default）                | Phase 1.5  |
-| K8  | 降級 | 子系統失敗時角色保持「在線」 | < 3 秒切 fallback                  | Phase 1.5  |
+| K8  | 降級 | 子系統失敗時角色保持「在線」 | < 3 秒切 fallback（**2026-06-08 實測 16ms**）| Phase 1.5  |
 | K9  | 可用 | 5 歲到 80 歲會用             | v2 驗證                            | v2         |
 | K10 | 測試 | bridge 覆蓋率                | ≥ 80%                             | Phase 1+   |
+
+**K2 細節**（2026-06-08 量測）：
+- 目標 < 2 秒（本地 LLM）/ < 5 秒（雲端）
+- **本地 CPU 3B (Ollama llama3.2:3b-instruct-q4_0)**：median **4.22s**（PASS < 5s、FAIL < 2s）
+- **雲端 MiniMax-M3 (Anthropic endpoint)**：median **30.80s**（FAIL）
+- 結論：K2 < 2s 目標需要 GPU 加速或更小模型（1B 或更小）；CPU 跑 3B 約 4s 是這台機器（AMD Ryzen 9 5900HX）的物理上限
+- 量測 scripts：`scripts/perf/measure_k2.py`
 
 每個 Phase 的「驗收條件」應該至少對應 1-3 個 KPI 的數字，**不是**靠「看起來能用」。
 
