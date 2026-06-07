@@ -82,6 +82,28 @@ cd os-runtime
 cargo build
 ```
 
+**Windows + MinGW**：如果 cargo 報 `link.exe not found` 或 `dbghelp.lib not found`，
+表示需要切到 GNU toolchain（詳見下面「Windows 開發指南」）。
+```powershell
+# 1. 下載 WinLibs MinGW（POSIX + UCRT）
+Invoke-WebRequest -Uri "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.1.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64ucrt-14.0.0-r2.zip" -OutFile "$env:TEMP\winlibs.zip"
+
+# 2. 解壓到 user 目錄（避免需要 admin）
+Expand-Archive -Path "$env:TEMP\winlibs.zip" -DestinationPath "$env:USERPROFILE\tools\winlibs" -Force
+
+# 3. 切到 GNU toolchain
+rustup default stable-gnu
+
+# 4. 加 MinGW 到 PATH（current PowerShell session）
+$env:PATH = "$env:USERPROFILE\tools\winlibs\mingw64\bin;$env:PATH"
+where.exe gcc   # 應該顯示 mingw64\bin\gcc.exe
+
+# 5. build
+cd "C:\coconut chennel\SIRO\os-runtime"
+Remove-Item -Recurse -Force target
+cargo build
+```
+
 Debug build：
 ```bash
 cargo run --bin siro-runtime -- --help
