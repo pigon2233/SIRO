@@ -7,20 +7,27 @@ K2 量化測量：使用者輸入 → 角色回應的時間
 2. 用 httpx 打 /chat endpoint
 3. 量從送出 request 到拿到回應的時間
 4. 連跑 5 次取中位數
+
+環境變數：
+- BRIDGE_PORT（預設 8001）：bridge 監聽的 port
 """
 import asyncio
+import os
 import statistics
 import sys
 import time
 sys.path.insert(0, "c:/coconut chennel/SIRO")
 import httpx
 
+BRIDGE_PORT = os.environ.get("BRIDGE_PORT", "8001")
+BRIDGE_BASE = f"http://127.0.0.1:{BRIDGE_PORT}"
+
 
 async def measure_once(client: httpx.AsyncClient, message: str) -> float:
     """量一次 chat 的回應時間（秒）"""
     t0 = time.time()
     resp = await client.post(
-        "http://127.0.0.1:8001/chat",
+        f"{BRIDGE_BASE}/chat",
         json={
             "message": message,
             "user_id": "k2_perf",
@@ -37,6 +44,7 @@ async def measure_once(client: httpx.AsyncClient, message: str) -> float:
 async def main():
     print("=== K2 Performance Test ===")
     print("目標：使用者輸入 → 角色回應 < 2 秒（本地 LLM）")
+    print(f"Bridge: {BRIDGE_BASE}")
     print()
 
     messages = [
@@ -50,7 +58,7 @@ async def main():
     async with httpx.AsyncClient() as client:
         # 健康檢查
         try:
-            r = await client.get("http://127.0.0.1:8001/health", timeout=5.0)
+            r = await client.get(f"{BRIDGE_BASE}/health", timeout=5.0)
             r.raise_for_status()
             print(f"bridge health: {r.json()}")
         except Exception as e:

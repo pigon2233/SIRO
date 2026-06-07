@@ -7,9 +7,14 @@ K8 量化測量：subsystem 死掉 → Mao 切 fallback 表情的時間
 2. 用 WS 連 bridge、開始收 system_event
 3. 用 gRPC kill bridge service
 4. 量從 kill 到收到 service.restarted event 的時間
+
+環境變數：
+- BRIDGE_PORT（預設 8001）：bridge WS port
+- SIRO_RUNTIME_PORT（預設 50051）：siro-runtime gRPC port
 """
 import asyncio
 import json
+import os
 import sys
 import time
 sys.path.insert(0, "c:/coconut chennel/SIRO/bridge/grpc_client/generated")
@@ -45,8 +50,10 @@ async def main():
     print()
 
     # 連 bridge WS
-    print("[step 1] 連 bridge WS...")
-    async with websockets.connect("ws://127.0.0.1:8001/ws") as ws:
+    bridge_port = os.environ.get("BRIDGE_PORT", "8001")
+    runtime_port = os.environ.get("SIRO_RUNTIME_PORT", "50051")
+    print(f"[step 1] 連 bridge WS ws://127.0.0.1:{bridge_port}/ws ...")
+    async with websockets.connect(f"ws://127.0.0.1:{bridge_port}/ws") as ws:
         print("  ws connected")
 
         # 等 2 秒讓 consumer 完全 ready
@@ -56,7 +63,7 @@ async def main():
         # 觸發 kill bridge service
         print("[step 3] 用 gRPC 觸發 kill bridge（ControlService stop）...")
         t0 = time.time()
-        async with grpc.aio.insecure_channel("127.0.0.1:50051") as ch:
+        async with grpc.aio.insecure_channel(f"127.0.0.1:{runtime_port}") as ch:
             stub = siro_pb2_grpc.SiroRuntimeStub(ch)
             # 用 hermes 來測（auto-restart 會觸發 event；bridge 真的 kill 會害自己掛掉）
             await stub.ControlService(
