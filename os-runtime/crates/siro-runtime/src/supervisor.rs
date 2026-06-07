@@ -166,7 +166,7 @@ impl Supervisor {
                     ServiceStatus::Running { pid, started_at: _ } => {
                         // 檢查 PID 是否還活著
                         let elapsed = Utc::now() - chrono::Duration::seconds(info.def.health_check_interval_sec as i64);
-                        if !sys.process(sysinfo::Pid::from_u32(*pid)).is_some() {
+                        if sys.process(sysinfo::Pid::from_u32(*pid)).is_none() {
                             // 死掉了
                             warn!(
                                 "[Supervisor] {} (pid={}) 死了、準備重啟",
@@ -182,15 +182,14 @@ impl Supervisor {
                             let _ = elapsed;  // 之後用
                         }
                     }
-                    ServiceStatus::WaitingRestart { retry_at, last_error } => {
-                        if Utc::now() >= *retry_at {
+                    ServiceStatus::WaitingRestart { retry_at, last_error }
+                        if Utc::now() >= *retry_at => {
                             info!(
                                 "[Supervisor] {} retry_at 到、重新啟動",
                                 name
                             );
                             to_restart.push((name.clone(), last_error.clone()));
                         }
-                    }
                     _ => {}  // Stopped / Starting / GaveUp：本 tick 不動
                 }
             }
@@ -400,7 +399,7 @@ impl Supervisor {
             .map(|(name, info)| {
                 let (pid, uptime_sec, mem_bytes) = match &info.status {
                     ServiceStatus::Running { pid, started_at } => {
-                        let uptime = (Utc::now() - *started_at).num_seconds().max(0) as i64;
+                        let uptime = (Utc::now() - *started_at).num_seconds().max(0);
                         let mem = sys
                             .process(sysinfo::Pid::from_u32(*pid))
                             .map(|p| p.memory() as i64)  // sysinfo 已經回 bytes

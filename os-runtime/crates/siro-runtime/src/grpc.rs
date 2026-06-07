@@ -200,11 +200,12 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
         &self,
         _request: Request<generated::Empty>,
     ) -> Result<Response<generated::HealthStatus>, Status> {
-        // Health 就是 v0.2.0 的版本資訊
+        // Health 回版本 + 實際 uptime（siro-runtime 啟動到現在過了幾秒）
+        let uptime_seconds = self.started_at.elapsed().as_secs() as i64;
         Ok(Response::new(generated::HealthStatus {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            uptime_seconds: 0,  // v0.4+ 改成 process 實際 uptime
+            uptime_seconds,
             issues: vec![],
         }))
     }
@@ -334,6 +335,6 @@ fn event_receiver_to_stream(
         wanted_types.contains(&event.event_type)
     });
 
-    let proto_stream = filtered.map(|event| Ok(event));
+    let proto_stream = filtered.map(Ok);
     Box::pin(proto_stream)
 }

@@ -6,7 +6,7 @@
 // v0.3.0 先實作 supervisor 監控最關鍵的 3 個：bridge / hermes / unity。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +63,7 @@ fn default_health_interval() -> u32 {
 ///   - bridge.main 在 ../bridge/main.py
 ///   - hermes binary 假設在 PATH
 ///   - unity 透過 launch 腳本（未來 Phase 4 改成 kiosk 整合）
-pub fn default_services(project_root: &PathBuf) -> Vec<ServiceDef> {
+pub fn default_services(project_root: &Path) -> Vec<ServiceDef> {
     vec![
         ServiceDef {
             name: "bridge".to_string(),
