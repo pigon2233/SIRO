@@ -1,24 +1,23 @@
-// build.rs - siro-runtime
+// build.rs - siro-ctl
 //
-// 從 workspace 根的 proto/siro.proto 生成 Rust gRPC stubs
+// 從 proto/siro.proto 生成 Rust gRPC **client** stubs
+// （siro-runtime 是 server + client、siro-ctl 只要 client）
+//
 // 需要 protoc 3.x（https://grpc.io/docs/protoc-installation/）
-//
-// 執行：cargo build（會自動跑這個 build script）
-// 產物：$OUT_DIR/siro.runtime.v1.rs（被 include!() 到 src/grpc.rs）
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // build script 跑；runtime, 不能用 env! 巨需 (compile-time)
+    // 注意：build script 跑時是 runtime、不能用 env! 巨集（那是 compile-time）
+    // 用 std::env::var 拿 Cargo 提供的環境變數
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .map_err(|e| format!("CARGO_MANIFEST_DIR not set: {}", e))?;
     let proto_dir = std::path::PathBuf::from(manifest_dir)
         .parent()  // crates/
         .and_then(|p| p.parent())  // os-runtime/
-        .ok_or("proto dir not found")?
+        .ok_or("無法推算 proto dir")?
         .join("proto");
 
     let proto_file = proto_dir.join("siro.proto");
 
-    // 確認 proto 檔存在（友善錯誤訊息）
     if !proto_file.exists() {
         return Err(format!(
             "proto 檔不存在：{}。請確認 proto/siro.proto 有存在。",
@@ -29,11 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_file.display());
     println!("cargo:rerun-if-changed=build.rs");
 
+    // siro-ctl 只要 client（不要 server）
     tonic_prost_build::configure()
-        .build_server(true)
+        .build_server(false)  // siro-ctl 是 client
         .build_client(true)
-        .file_descriptor_set_path(std::path::PathBuf::from(std::env::var("OUT_DIR")?)
-            .join("siro_descriptor.bin"))
         .compile_protos(&[proto_file], &[proto_dir])?;
 
     Ok(())

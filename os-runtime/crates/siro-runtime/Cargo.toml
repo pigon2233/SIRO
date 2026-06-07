@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -22,6 +23,7 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+sysinfo = { workspace = true }
 # Phase 3 gRPC（需要 protoc 3.x 編譯 proto）
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
