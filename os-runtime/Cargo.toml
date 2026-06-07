@@ -18,9 +18,9 @@ repository = "https://github.com/pigon2233/SIRO"
 tokio = { version = "1.40", features = ["full"] }
 # gRPC — Phase 3 啟用（需要 protoc 3.x 裝好才能 cargo build）
 # 安裝指引見 os-runtime/README.md
-tonic = "0.12"
-tonic-prost = "0.12"
-tonic-prost-build = "0.12"
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
 prost = "0.13"
 # CLI
 clap = { version = "4.5", features = ["derive"] }
