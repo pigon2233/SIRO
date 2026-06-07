@@ -3,23 +3,43 @@
 # 這檔是「範本」、請 cp 成 ~/.cargo/config.toml 後再依需要改
 # 放在 ~/.cargo/config.toml 才會被 cargo 自動讀
 #
-# 主要場景：
-#   1. 預設：直接用 crates.io（網路通時用這個）
-#   2. 中國網路：換 rsproxy mirror
-#   3. 公司網路：換 internal mirror
+# 主要場景（推薦順序）：
+#   1. 預設：直接用 crates.io（最安全、台灣用戶預設用這個）
+#   2. 企業 mirror：公司內部 artifact server
+#   3. China mirror：人在中國、GFW 擋 crates.io（不推薦、第三方風險）
 #
 # 用法：
 #   cp config.toml.example ~/.cargo/config.toml
 #   然後編輯、把不要的 [source.*] 段註解掉
 
 # ============================================================
-# 場景 1：預設（crates.io + sparse index、推薦）
+# 場景 1：預設（crates.io + sparse index、推薦、台灣用戶就用這個）
 # ============================================================
 [registries.crates-io]
 protocol = "sparse"
 
 # ============================================================
-# 場景 2：中國網路（用 rsproxy.cn mirror）
+# 場景 2：公司內部 mirror
+# 換成公司 artifact server URL、可以加速、避開外網依賴
+# 但要 trust 該 server（管理員能注入任何 crate）
+# ============================================================
+# 解除以下註解、把上面 [registries.crates-io] 註解掉：
+#
+# [source.crates-io]
+# replace-with = "my-company-mirror"
+#
+# [registries.my-company-mirror]
+# index = "sparse+https://artifacts.company.com/cargo/index/"
+# registry = "https://artifacts.company.com/cargo/registry/"
+
+# ============================================================
+# 場景 3：China mirror（不推薦、第三方風險）
+# 限制：
+#   - rsproxy.cn 是第三方、可能 log 下載、可能注入惡意 crate
+#   - checksum 雖然有 cargo 驗、但前提是鎖檔案沒被改
+#   - 不在中國的用戶強烈不建議使用（沒好處只有風險）
+#
+# 只有在中國、被 GFW 擋 crates.io、又沒 VPN 才考慮
 # ============================================================
 # 解除以下註解、把上面 [registries.crates-io] 註解掉：
 #
@@ -32,18 +52,6 @@ protocol = "sparse"
 #
 # [registries.rsproxy-sparse]
 # index = "sparse+https://rsproxy.cn/index/"
-
-# ============================================================
-# 場景 3：公司內部 mirror（自己換 URL）
-# ============================================================
-# 解除以下註解、依公司設定：
-#
-# [source.crates-io]
-# replace-with = "my-internal-mirror"
-#
-# [registries.my-internal-mirror]
-# index = "sparse+https://internal-mirror.company.com/index/"
-# registry = "https://internal-mirror.company.com/crates.io-index"
 
 # ============================================================
 # Build 優化（所有場景都適用）
