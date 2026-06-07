@@ -1,39 +1,30 @@
 // src/grpc.rs - siro-runtime gRPC module
 //
-// 從 build.rs 生成的 proto stubs 重新 export
-// 加上 tonic 伺服器 trait 實作（Phase 3 開始時擴充）
+// v0.3.0: 從 stub 升級成實際調用 supervisor
+// RPC 接到 service 真的做事（之前是回 unimplemented）
 
 // `mod generated { ... }` 把 build.rs 產生的程式碼包進來
-// OUT_DIR 是 build script 設定的環境變數
 pub mod generated {
     tonic::include_proto!("siro.runtime.v1");
 }
 
-// 重新 export 常用 types（避免 caller 寫兩層 grpc::generated::）
-// 注意：build.rs 的 tonic::include_proto! 已經把 generated 模組 expose 出來
-// 這裡不用 pub use（trait impl 用全路徑 generated::* 就好）
+// 注意：這裡不 re-export generated::* — siro-ctl 走自己的 include_proto!，
+// 這個 binary 不對外提供 types
+
+use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-/// Phase 3 預留：gRPC server 實作
-/// 現在只 stub GetStatus、回個 hello world
-/// 之後會分模組（service_manager / hardware / kiosk / events）
+use crate::supervisor::Supervisor;
+
+/// gRPC server 實作（v0.3.0：接到 supervisor）
 pub struct SiroRuntimeServer {
-    /// 啟動時間（unix seconds）— 健康檢查用
-    pub started_at: i64,
+    supervisor: Arc<Supervisor>,
 }
 
 impl SiroRuntimeServer {
-    pub fn new() -> Self {
-        Self {
-            started_at: chrono::Utc::now().timestamp(),
-        }
-    }
-}
-
-impl Default for SiroRuntimeServer {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(supervisor: Arc<Supervisor>) -> Self {
+        Self { supervisor }
     }
 }
 
@@ -43,24 +34,44 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
         &self,
         _request: Request<generated::Empty>,
     ) -> Result<Response<generated::SystemStatus>, Status> {
-        // Phase 3 開始時、這裡要查各 service 狀態、組裝 SystemStatus
-        // 現階段先回空 status
-        let status = generated::SystemStatus {
-            services: Default::default(),  // empty map、待 Phase 3 填
-            metrics: None,
-        };
-        Ok(Response::new(status))
+        // v0.3.0：直接從 supervisor 拿所有 service snapshot
+        let snapshots = self.supervisor.snapshot().await;
+        let mut services_map = std::collections::HashMap::new();
+        for snap in snapshots {
+            services_map.insert(snap.name.clone(), snap.to_proto_state());
+        }
+        Ok(Response::new(generated::SystemStatus {
+            services: services_map,
+            metrics: None,  // v0.4+ 加 CPU/Mem metrics
+        }))
     }
 
     async fn get_hardware_info(
         &self,
         _request: Request<generated::Empty>,
     ) -> Result<Response<generated::HardwareInfo>, Status> {
-        // Phase 3 用 sysinfo crate 抓 CPU/Memory/GPU
-        // 現階段先回空
+        // v0.3.0 簡化：CPU/Mem 資訊用 sysinfo
+        // GPU 跟 audio device 留 v0.4+ 實作
+        use sysinfo::System;
+        let sys = System::new_all();
+        let cpu = generated::CpuInfo {
+            model: sys
+                .cpus()
+                .first()
+                .map(|c| c.brand().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            cores: sys.physical_core_count().unwrap_or(0) as i32,
+            threads: sys.cpus().len() as i32,
+            frequency_ghz: sys.cpus().first().map(|c| c.frequency() as f32 / 1000.0).unwrap_or(0.0),
+        };
+        let memory = generated::MemoryInfo {
+            // sysinfo 已經回 bytes、不用再乘 1024
+            total_bytes: sys.total_memory() as i64,
+            available_bytes: sys.available_memory() as i64,
+        };
         Ok(Response::new(generated::HardwareInfo {
-            cpu: None,
-            memory: None,
+            cpu: Some(cpu),
+            memory: Some(memory),
             gpu: None,
             audio: vec![],
             display: None,
@@ -70,28 +81,61 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
 
     async fn restart_service(
         &self,
-        _request: Request<generated::ServiceName>,
+        request: Request<generated::ServiceName>,
     ) -> Result<Response<generated::Ack>, Status> {
-        Err(Status::unimplemented(
-            "restart_service 還沒實作、Phase 3 會做"
-        ))
+        let name = request.into_inner().name;
+        if name.is_empty() {
+            return Err(Status::invalid_argument("service name 不可空白"));
+        }
+        match self.supervisor.restart(&name).await {
+            Ok(()) => Ok(Response::new(generated::Ack {
+                ok: true,
+                message: format!("{} 重啟成功", name),
+            })),
+            Err(e) => Ok(Response::new(generated::Ack {
+                ok: false,
+                message: format!("{} 重啟失敗: {}", name, e),
+            })),
+        }
     }
 
     async fn control_service(
         &self,
-        _request: Request<generated::ServiceControl>,
+        request: Request<generated::ServiceControl>,
     ) -> Result<Response<generated::Ack>, Status> {
-        Err(Status::unimplemented(
-            "control_service 還沒實作、Phase 3 會做"
-        ))
+        use crate::proto::service_control::ServiceAction;
+        let ctrl = request.into_inner();
+        let name = ctrl.name;
+        let result = match ServiceAction::try_from(ctrl.action) {
+            Ok(ServiceAction::Start) => self.supervisor.start(&name).await,
+            Ok(ServiceAction::Stop) => self.supervisor.stop(&name).await,
+            Ok(ServiceAction::Restart) => self.supervisor.restart(&name).await,
+            Ok(ServiceAction::Unknown) | Err(_) => {
+                return Ok(Response::new(generated::Ack {
+                    ok: false,
+                    message: format!("{} 未知 action", name),
+                }));
+            }
+        };
+        match result {
+            Ok(()) => Ok(Response::new(generated::Ack {
+                ok: true,
+                message: format!("{} 動作成功", name),
+            })),
+            Err(e) => Ok(Response::new(generated::Ack {
+                ok: false,
+                message: format!("{} 失敗: {}", name, e),
+            })),
+        }
     }
 
     async fn set_kiosk_mode(
         &self,
         _request: Request<generated::KioskRequest>,
     ) -> Result<Response<generated::Ack>, Status> {
+        // v0.3.0 預留：Phase 4+ 實作
         Err(Status::unimplemented(
-            "set_kiosk_mode 還沒實作、Phase 3 會做"
+            "set_kiosk_mode 還沒實作、Phase 4 會做"
         ))
     }
 
@@ -99,11 +143,11 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
         &self,
         _request: Request<generated::Empty>,
     ) -> Result<Response<generated::HealthStatus>, Status> {
-        let now = chrono::Utc::now().timestamp();
+        // Health 就是 v0.2.0 的版本資訊
         Ok(Response::new(generated::HealthStatus {
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            uptime_seconds: now - self.started_at,
+            uptime_seconds: 0,  // v0.4+ 改成 process 實際 uptime
             issues: vec![],
         }))
     }
@@ -112,7 +156,7 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
         &self,
         _request: Request<generated::LogFilter>,
     ) -> Result<Response<Self::StreamLogsStream>, Status> {
-        // Phase 3 用 tokio broadcast channel 串接 tracing subscriber
+        // Phase 3 預留：Phase 4 整合 tracing subscriber 串流
         Err(Status::unimplemented("stream_logs 還沒實作"))
     }
 
