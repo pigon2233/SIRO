@@ -162,16 +162,28 @@ def _event_consumer_thread(client: RuntimeClient, loop: asyncio.AbstractEventLoo
     - gRPC sync streaming 是 blocking iterator
     - 直接在 asyncio event loop 跑會 block 整個 bridge
     - 跑在獨立 thread + asyncio.Queue.put_nowait_from_thread 推 queue 把 sync/async 邊界切乾淨
+
+    v0.3.0+ 加 retry loop：siro-runtime 連不上 / 連線斷了 / RPC 失敗 → 等 5s 重連
+    沒 retry 時 siro-runtime 還沒起、或重啟時 consumer 就死掉且永遠不會 reconnect
     """
+    import time
     logger.info(f"[system_events] consumer thread 啟動 address={client.address}")
-    try:
-        for i, event in enumerate(client.subscribe_events_sync([])):
-            logger.info(f"[system_events] got event #{i}: {event.get('event_type')} {event.get('data')}")
-            # 用 call_soon_threadsafe 從其他 thread 安全推 asyncio queue
-            loop.call_soon_threadsafe(_event_queue.put_nowait, event)
-    except Exception as e:
-        logger.warning(f"[system_events] consumer thread 例外: {type(e).__name__}: {e}")
-    logger.info("[system_events] consumer thread 退出")
+    retry_delay_sec = 5
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            logger.info(f"[system_events] subscribe 嘗試 #{attempt}（address={client.address}）")
+            for i, event in enumerate(client.subscribe_events_sync([])):
+                if i == 0:
+                    logger.info(f"[system_events] 訂閱成功、開始收 events")
+                logger.info(f"[system_events] got event #{i}: {event.get('event_type')} {event.get('data')}")
+                loop.call_soon_threadsafe(_event_queue.put_nowait, event)
+        except Exception as e:
+            logger.warning(f"[system_events] consumer 例外 (attempt #{attempt}): {type(e).__name__}: {e}")
+        # 失敗或 iterator 自然結束（不該發生、但保險）→ 等 5s 重試
+        logger.info(f"[system_events] {retry_delay_sec}s 後 retry...")
+        time.sleep(retry_delay_sec)
 
 
 async def _consume_system_events() -> None:
