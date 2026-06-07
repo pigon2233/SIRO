@@ -192,7 +192,9 @@ class TestChatStreamHappyPath:
 
 class TestChatStreamErrors:
     @pytest.mark.asyncio
-    async def test_missing_config_raises(self):
+    async def test_missing_config_raises(self, clean_env):
+        # 用 clean_env fixture 確保其他 test 設的 env vars 不會 leak 進來
+        # （如果漏、streaming client 會以為有設定、不會 raise RuntimeError）
         c = MiniMaxStreamingClient()  # 沒設 env
         with pytest.raises(RuntimeError, match="設定不齊"):
             async for _ in c.chat_stream("hi"):

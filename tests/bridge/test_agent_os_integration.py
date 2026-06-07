@@ -339,8 +339,14 @@ class TestWebSocketStreaming:
 
     @pytest.fixture
     def enable_streaming(self, monkeypatch):
-        """打開 SIRO_STREAMING flag + 把 streaming_client 換成 mock"""
+        """打開 SIRO_STREAMING flag + 關 use_tool_calling（不然 /ws 走 tool calling 路徑、沒 delta）+ 把 streaming_client 換成 mock
+
+        為什麼要關 use_tool_calling：
+        bridge /ws 路徑優先檢查 use_tool_calling，True 就走 tool calling 流程（直接收 response、無 delta）
+        我們要測 plain streaming 流程、所以兩個都要 set
+        """
         monkeypatch.setattr(state, "use_streaming", True, raising=False)
+        monkeypatch.setattr(state, "use_tool_calling", False, raising=False)
         yield
 
     @pytest.fixture
