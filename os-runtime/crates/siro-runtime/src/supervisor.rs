@@ -22,6 +22,7 @@ use tokio::time::{interval, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use crate::event_bus::{Buses, LogEntry, RuntimeEvent};
 use crate::services::ServiceDef;
 
 /// Service 當前狀態（runtime mutable state）
@@ -84,10 +85,12 @@ pub struct Supervisor {
     children: Arc<Mutex<HashMap<String, Child>>>,
     /// 背景 monitor task 的 cancel token
     cancel: CancellationToken,
+    /// v0.3.0：event/log bus（給 stream_logs + subscribe_events 推播用）
+    buses: Buses,
 }
 
 impl Supervisor {
-    pub fn new(service_defs: Vec<ServiceDef>) -> Self {
+    pub fn new(service_defs: Vec<ServiceDef>, buses: Buses) -> Self {
         let services = service_defs
             .into_iter()
             .map(|def| {
@@ -106,6 +109,7 @@ impl Supervisor {
             services: Arc::new(RwLock::new(services)),
             children: Arc::new(Mutex::new(HashMap::new())),
             cancel: CancellationToken::new(),
+            buses,
         }
     }
 
@@ -116,6 +120,8 @@ impl Supervisor {
         let services = self.services.clone();
         let children = self.children.clone();
         let cancel = self.cancel.clone();
+        // v0.3.0：clone buses 進 closure（tick_once 用 buses 推 log/event）
+        let buses = self.buses.clone();
 
         // 用 tokio::spawn 跑一個 task 巡所有 service
         tokio::spawn(async move {
@@ -133,7 +139,7 @@ impl Supervisor {
                         break;
                     }
                     _ = ticker.tick() => {
-                        Self::tick_once(&services, &children).await;
+                        Self::tick_once(&services, &children, &buses).await;
                     }
                 }
             }
@@ -141,9 +147,11 @@ impl Supervisor {
     }
 
     /// 監控 tick：對每個 service 檢查該不該 health check / restart
+    /// v0.3.0：static fn + 收 buses 當參數（spawn_monitor 才能 clone 進 closure）
     async fn tick_once(
         services: &Arc<RwLock<HashMap<String, ServiceInfo>>>,
         children: &Arc<Mutex<HashMap<String, Child>>>,
+        buses: &Buses,
     ) {
         // 用 sysinfo 一次性查所有 PID（避免每 service 一次系統 call）
         let mut sys = System::new_all();
@@ -190,7 +198,7 @@ impl Supervisor {
 
         // 執行重啟（在 write lock 外做實際 spawn、避免 deadlock）
         for (name, error) in to_restart {
-            if let Err(e) = Self::do_restart(services, children, &name, &error).await {
+            if let Err(e) = Self::do_restart(services, children, buses, &name, &error).await {
                 error!("[Supervisor] {} 重啟失敗: {}", name, e);
             }
         }
@@ -214,10 +222,12 @@ impl Supervisor {
         cmd.spawn().map_err(|e| format!("spawn 失敗: {}", e))
     }
 
-    /// 真的重啟一個 service（給 monitor loop 呼叫）
+    /// 真的重啟一個 service（給 monitor loop 呼叫 + 給 public start/restart 呼叫）
+    /// v0.3.0：static fn + 收 buses 當參數（這樣 spawn_monitor 的 closure 才能呼叫）
     async fn do_restart(
         services: &Arc<RwLock<HashMap<String, ServiceInfo>>>,
         children: &Arc<Mutex<HashMap<String, Child>>>,
+        buses: &Buses,
         name: &str,
         reason: &str,
     ) -> Result<(), String> {
@@ -262,6 +272,16 @@ impl Supervisor {
                 name, restart_count, def.max_restarts
             );
             Self::mark_gave_up(services, name, reason.to_string(), restart_count).await;
+            // 推 GaveUp event
+            buses.logs.publish(LogEntry::now(
+                name,
+                "error",
+                format!("{} 重啟 {} 次、放棄", name, restart_count),
+            ));
+            buses.events.publish(RuntimeEvent::ServiceFailed {
+                name: name.to_string(),
+                error: format!("gave up after {} restarts", restart_count),
+            });
             return Ok(());
         }
 
@@ -289,6 +309,27 @@ impl Supervisor {
             "[Supervisor] {} 重啟成功、pid={}（第 {} 次）",
             name, pid, new_count
         );
+
+        // v0.3.0：推 log + event 到 bus
+        // 第一次啟動（restart_count=0）叫 service.started、第 N 次叫 service.restarted
+        let was_restart = new_count > 1;
+        buses.logs.publish(LogEntry::now(
+            name,
+            "info",
+            format!("{} 重啟成功、pid={}（第 {} 次）", name, pid, new_count),
+        ));
+        if was_restart {
+            buses.events.publish(RuntimeEvent::ServiceRestarted {
+                name: name.to_string(),
+                pid,
+                count: new_count,
+            });
+        } else {
+            buses.events.publish(RuntimeEvent::ServiceStarted {
+                name: name.to_string(),
+                pid,
+            });
+        }
         Ok(())
     }
 
@@ -301,17 +342,19 @@ impl Supervisor {
         let mut services_lock = services.write().await;
         if let Some(info) = services_lock.get_mut(name) {
             info.status = ServiceStatus::GaveUp {
-                last_error: error,
+                last_error: error.clone(),
                 total_restarts: total,
             };
         }
+        // 注意：這個 static fn 拿不到 self.buses
+        // 我們讓外面呼叫端自己 publish（看 do_restart 內的 call site）
     }
 
     // ========== Public API（給 gRPC handler 呼叫）==========
 
     /// 手動啟動一個 service（siro-ctl start bridge）
     pub async fn start(&self, name: &str) -> Result<(), String> {
-        Self::do_restart(&self.services, &self.children, name, "manual start").await
+        Self::do_restart(&self.services, &self.children, &self.buses, name, "manual start").await
     }
 
     /// 手動停止一個 service
@@ -334,7 +377,7 @@ impl Supervisor {
 
     /// 手動重啟一個 service
     pub async fn restart(&self, name: &str) -> Result<(), String> {
-        Self::do_restart(&self.services, &self.children, name, "manual restart").await
+        Self::do_restart(&self.services, &self.children, &self.buses, name, "manual restart").await
     }
 
     /// 拿所有 service 狀態（給 GetStatus RPC 用）

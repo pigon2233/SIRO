@@ -41,6 +41,8 @@ chrono = { version = "0.4", features = ["serde"] }
 sysinfo = "0.32"
 # Async runtime extras
 tokio-util = { version = "0.7", features = ["rt"] }
+# v0.3.0：給 stream_logs / subscribe_events RPC 用的 Stream trait wrapper
+tokio-stream = { version = "0.1", features = ["sync"] }
 
 # 優化設定
 [profile.release]

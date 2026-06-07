@@ -28,6 +28,8 @@ sysinfo = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 prost = { workspace = true }
+# v0.3.0：stream_logs / subscribe_events RPC 用的 Stream wrapper
+tokio-stream = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

@@ -5,6 +5,7 @@
 //! v0.3.0 (Phase 3 supervisor 啟動): 加上 process supervisor
 //!          監控 bridge / hermes / unity、auto-restart、暴露 gRPC API
 
+mod event_bus;
 mod grpc;
 mod services;
 mod supervisor;
@@ -99,9 +100,12 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        // v0.3.0：建立 event/log bus（給 stream_logs + subscribe_events 用）
+        let buses = event_bus::Buses::new();
+
         // supervisor 跟所有 tokio::spawn 都在 runtime 內建立
         // （修正原本 sync main 先 spawn 再建 runtime 會 panic 的 bug）
-        let supervisor = Arc::new(supervisor::Supervisor::new(service_defs));
+        let supervisor = Arc::new(supervisor::Supervisor::new(service_defs, buses.clone()));
 
         // 啟動 background monitor task
         supervisor.spawn_monitor();
@@ -131,7 +135,7 @@ fn main() -> anyhow::Result<()> {
             .expect("無法 parse grpc_addr");
         info!("gRPC server 啟動中、addr={}", addr);
 
-        let server = grpc::SiroRuntimeServer::new(supervisor.clone());
+        let server = grpc::SiroRuntimeServer::new(supervisor.clone(), buses.clone());
         let svc = proto::siro_runtime_server::SiroRuntimeServer::new(server);
         let server_handle = tokio::spawn(async move {
             if let Err(e) = tonic::transport::Server::builder()

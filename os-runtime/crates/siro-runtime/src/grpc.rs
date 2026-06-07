@@ -11,20 +11,49 @@ pub mod generated {
 // 注意：這裡不 re-export generated::* — siro-ctl 走自己的 include_proto!，
 // 這個 binary 不對外提供 types
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use tokio_stream::wrappers::BroadcastStream;
 use tonic::{Request, Response, Status};
+use tracing::info;
 
+use crate::event_bus::{Buses, LogEntry, RuntimeEvent};
 use crate::supervisor::Supervisor;
+
+/// 把 tracing level 字串轉成 number（給 min_level filter 用）
+/// debug=0 / info=1 / warn=2 / error=3
+/// 解析失敗的 level 當 info
+fn level_to_number(level: &str) -> u8 {
+    match level.to_lowercase().as_str() {
+        "debug" | "trace" => 0,
+        "info" => 1,
+        "warn" | "warning" => 2,
+        "error" => 3,
+        _ => 1,  // 預設 info
+    }
+}
 
 /// gRPC server 實作（v0.3.0：接到 supervisor）
 pub struct SiroRuntimeServer {
     supervisor: Arc<Supervisor>,
+    /// v0.3.0：event/log bus（給 stream_logs + subscribe_events 用）
+    buses: Buses,
+    /// v0.3.0：kiosk 模式 state（Phase 4 會接 X11/Wayland 真正切換）
+    /// v0.3.0 階段：純 in-memory flag、set_kiosk_mode RPC 改這個值 + 推 event
+    kiosk_enabled: Arc<AtomicBool>,
+    /// siro-runtime 啟動時間（給 Health.uptime 用）
+    started_at: std::time::Instant,
 }
 
 impl SiroRuntimeServer {
-    pub fn new(supervisor: Arc<Supervisor>) -> Self {
-        Self { supervisor }
+    pub fn new(supervisor: Arc<Supervisor>, buses: Buses) -> Self {
+        Self {
+            supervisor,
+            buses,
+            kiosk_enabled: Arc::new(AtomicBool::new(false)),
+            started_at: std::time::Instant::now(),
+        }
     }
 }
 
@@ -131,12 +160,40 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
 
     async fn set_kiosk_mode(
         &self,
-        _request: Request<generated::KioskRequest>,
+        request: Request<generated::KioskRequest>,
     ) -> Result<Response<generated::Ack>, Status> {
-        // v0.3.0 預留：Phase 4+ 實作
-        Err(Status::unimplemented(
-            "set_kiosk_mode 還沒實作、Phase 4 會做"
-        ))
+        let req = request.into_inner();
+        let was_enabled = self.kiosk_enabled.swap(req.enable, Ordering::SeqCst);
+        let now_enabled = req.enable;
+
+        info!(
+            "[kiosk] 切換 {} → {}（escape_password 設定: {}）",
+            if was_enabled { "ON" } else { "OFF" },
+            if now_enabled { "ON" } else { "OFF" },
+            !req.escape_password.is_empty()
+        );
+
+        // 推 log + event 到 bus
+        self.buses.logs.publish(LogEntry::now(
+            "siro-runtime",
+            "info",
+            format!(
+                "kiosk mode {} → {}",
+                if was_enabled { "ON" } else { "OFF" },
+                if now_enabled { "ON" } else { "OFF" }
+            ),
+        ));
+        self.buses.events.publish(RuntimeEvent::KioskModeChanged { enabled: now_enabled });
+
+        // v0.3.0 階段：純 in-memory flag、不真的切 X11/Wayland
+        // Phase 4 會接 openbox / Cage、Phase 5 會加實體 escape 按鈕
+        Ok(Response::new(generated::Ack {
+            ok: true,
+            message: format!(
+                "kiosk mode 已{}（v0.3.0 純 in-memory、Phase 4 整合 X11/Wayland）",
+                if now_enabled { "開啟" } else { "關閉" }
+            ),
+        }))
     }
 
     async fn health(
@@ -154,20 +211,129 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
 
     async fn stream_logs(
         &self,
-        _request: Request<generated::LogFilter>,
-    ) -> Result<Response<Self::StreamLogsStream>, Status> {
-        // Phase 3 預留：Phase 4 整合 tracing subscriber 串流
-        Err(Status::unimplemented("stream_logs 還沒實作"))
+        request: Request<generated::LogFilter>,
+    ) -> Result<Response<StreamLogsStreamType>, Status> {
+        let filter = request.into_inner();
+        info!(
+            "[stream_logs] 訂閱開始（service={:?} min_level={:?} pattern={:?}）",
+            filter.service, filter.min_level, filter.pattern
+        );
+
+        // 訂閱 log bus、轉成 gRPC stream
+        let receiver = self.buses.logs.subscribe();
+        let stream = log_receiver_to_stream(receiver, filter);
+
+        Ok(Response::new(stream))
     }
 
-    type StreamLogsStream = tonic::codec::Streaming<generated::LogEntry>;
+    type StreamLogsStream = StreamLogsStreamType;
 
     async fn subscribe_events(
         &self,
-        _request: Request<generated::EventFilter>,
-    ) -> Result<Response<Self::SubscribeEventsStream>, Status> {
-        Err(Status::unimplemented("subscribe_events 還沒實作"))
+        request: Request<generated::EventFilter>,
+    ) -> Result<Response<SubscribeEventsStreamType>, Status> {
+        let filter = request.into_inner();
+        info!(
+            "[subscribe_events] 訂閱開始（event_types={:?}）",
+            filter.event_types
+        );
+
+        let receiver = self.buses.events.subscribe();
+        let stream = event_receiver_to_stream(receiver, filter);
+
+        Ok(Response::new(stream))
     }
 
-    type SubscribeEventsStream = tonic::codec::Streaming<generated::SystemEvent>;
+    type SubscribeEventsStream = SubscribeEventsStreamType;
+}
+
+// ============================================================
+// Stream type aliases + helper functions（給 stream_logs / subscribe_events 用）
+// 放在 impl 外面當 free function 避免 Self::TypeName 找不到的問題
+// ============================================================
+
+use tokio_stream::StreamExt;
+
+type StreamLogsStreamType = std::pin::Pin<
+    Box<dyn tokio_stream::Stream<Item = Result<generated::LogEntry, Status>> + Send + 'static>,
+>;
+
+type SubscribeEventsStreamType = std::pin::Pin<
+    Box<dyn tokio_stream::Stream<Item = Result<generated::SystemEvent, Status>> + Send + 'static>,
+>;
+
+/// 把 LogBus 的 broadcast::Receiver 轉成 gRPC Stream<LogEntry>
+/// 加上 filter 邏輯（service / min_level / pattern）
+fn log_receiver_to_stream(
+    receiver: tokio::sync::broadcast::Receiver<LogEntry>,
+    filter: generated::LogFilter,
+) -> StreamLogsStreamType {
+    // 把 broadcast::Receiver 轉成 Stream<LogEntry>
+    let inner = BroadcastStream::new(receiver).filter_map(|result| {
+        match result {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                tracing::debug!("[stream_logs] receiver lagged: {}", e);
+                None
+            }
+        }
+    });
+
+    // 套 filter
+    let service_filter = filter.service;
+    let min_level = filter.min_level;
+    let pattern = filter.pattern;
+
+    let filtered = inner.filter_map(move |entry| {
+        if !service_filter.is_empty() && entry.service != service_filter {
+            return None;
+        }
+        if !min_level.is_empty() {
+            let entry_level = level_to_number(&entry.level);
+            let min = level_to_number(&min_level);
+            if entry_level < min {
+                return None;
+            }
+        }
+        if !pattern.is_empty() && !entry.message.contains(&pattern) {
+            return None;
+        }
+        Some(entry)
+    });
+
+    let proto_stream = filtered.map(|entry| {
+        Ok(generated::LogEntry {
+            service: entry.service,
+            level: entry.level,
+            message: entry.message,
+            timestamp_ms: entry.timestamp_ms,
+        })
+    });
+
+    Box::pin(proto_stream)
+}
+
+/// 把 EventBus 的 broadcast::Receiver 轉成 gRPC Stream<SystemEvent>
+fn event_receiver_to_stream(
+    receiver: tokio::sync::broadcast::Receiver<generated::SystemEvent>,
+    filter: generated::EventFilter,
+) -> SubscribeEventsStreamType {
+    let inner = BroadcastStream::new(receiver).filter_map(|result| match result {
+        Ok(event) => Some(event),
+        Err(e) => {
+            tracing::debug!("[subscribe_events] receiver lagged: {}", e);
+            None
+        }
+    });
+
+    let wanted_types: Vec<String> = filter.event_types;
+    let filtered = inner.filter(move |event| {
+        if wanted_types.is_empty() {
+            return true;
+        }
+        wanted_types.contains(&event.event_type)
+    });
+
+    let proto_stream = filtered.map(|event| Ok(event));
+    Box::pin(proto_stream)
 }
