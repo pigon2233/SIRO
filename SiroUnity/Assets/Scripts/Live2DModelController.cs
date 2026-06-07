@@ -470,7 +470,7 @@ namespace Siro
         /// LLM 透過 play_motion tool 決定要播的 motion、我們查 motionClips mapping 拿 .anim 然後播
         /// isLoop = false（一次性動作、播完回到 idle 呼吸）
         /// </summary>
-        private void HandleBridgeMotionPlay(HermesBridgeClient.BridgeMotionPlay msg)
+        private void HandleBridgeMotionPlay(BridgeMotionPlay msg)
         {
             if (msg == null || string.IsNullOrEmpty(msg.motion_group))
             {
