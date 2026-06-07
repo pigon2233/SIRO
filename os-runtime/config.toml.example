@@ -1,0 +1,66 @@
+# Cargo config for SIRO os-runtime
+#
+# 這檔是「範本」、請 cp 成 ~/.cargo/config.toml 後再依需要改
+# 放在 ~/.cargo/config.toml 才會被 cargo 自動讀
+#
+# 主要場景：
+#   1. 預設：直接用 crates.io（網路通時用這個）
+#   2. 中國網路：換 rsproxy mirror
+#   3. 公司網路：換 internal mirror
+#
+# 用法：
+#   cp config.toml.example ~/.cargo/config.toml
+#   然後編輯、把不要的 [source.*] 段註解掉
+
+# ============================================================
+# 場景 1：預設（crates.io + sparse index、推薦）
+# ============================================================
+[registries.crates-io]
+protocol = "sparse"
+
+# ============================================================
+# 場景 2：中國網路（用 rsproxy.cn mirror）
+# ============================================================
+# 解除以下註解、把上面 [registries.crates-io] 註解掉：
+#
+# [source.crates-io]
+# replace-with = "rsproxy-sparse"
+#
+# [registries.rsproxy]
+# index = "sparse+https://rsproxy.cn/index/"
+# registry = "https://rsproxy.cn/crates.io-index"
+#
+# [registries.rsproxy-sparse]
+# index = "sparse+https://rsproxy.cn/index/"
+
+# ============================================================
+# 場景 3：公司內部 mirror（自己換 URL）
+# ============================================================
+# 解除以下註解、依公司設定：
+#
+# [source.crates-io]
+# replace-with = "my-internal-mirror"
+#
+# [registries.my-internal-mirror]
+# index = "sparse+https://internal-mirror.company.com/index/"
+# registry = "https://internal-mirror.company.com/crates.io-index"
+
+# ============================================================
+# Build 優化（所有場景都適用）
+# ============================================================
+
+# 增加並行 jobs（依 CPU 核心數）
+[build]
+jobs = 8
+
+# 加快 incremental build
+[build]
+incremental = true
+
+# ============================================================
+# 環境變數
+# ============================================================
+
+# 如果 protoc 不在 PATH、設這個指向 protoc binary
+# [env]
+# PROTOC = "C:\\Program Files\\protoc-3.x\\bin\\protoc.exe"
