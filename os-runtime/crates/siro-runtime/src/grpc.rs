@@ -10,7 +10,8 @@ pub mod generated {
 }
 
 // 重新 export 常用 types（避免 caller 寫兩層 grpc::generated::）
-pub use generated::*;
+// 注意：build.rs 的 tonic::include_proto! 已經把 generated 模組 expose 出來
+// 這裡不用 pub use（trait impl 用全路徑 generated::* 就好）
 
 use tonic::{Request, Response, Status};
 
