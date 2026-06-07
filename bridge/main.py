@@ -13,11 +13,12 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Set
 
 # Windows console 預設 cp950 會解錯 hermes 的 UTF-8 輸出
 # 強制整個 process 用 UTF-8
@@ -138,9 +139,130 @@ class BridgeState:
         self.telegram_bot: Optional[TelegramBot] = None
         # v0.3.0：Phase 3 siro-runtime gRPC client（SIRO_RUNTIME_ENABLED=true 才會真的連）
         self.runtime: Optional[RuntimeClient] = None
+        # v0.3.0：追蹤所有已連線的 WebSocket（給 system_event 廣播用）
+        self.connected_websockets: Set = set()
+        self.ws_lock = asyncio.Lock()  # 保護 connected_websockets 新增/移除
 
 
 state = BridgeState()
+
+
+# ============================================================
+# v0.3.0：system_event 廣播（siro-runtime → bridge → Unity WS）
+# ============================================================
+
+# asyncio queue（lazy 創建、要等 event loop 存在才能建）
+_event_queue: Optional[asyncio.Queue] = None
+
+
+def _event_consumer_thread(client: RuntimeClient, loop: asyncio.AbstractEventLoop) -> None:
+    """跑在獨立 thread、同步收 siro-runtime events 推到 asyncio queue
+
+    為什麼用 thread 不用 asyncio：
+    - gRPC sync streaming 是 blocking iterator
+    - 直接在 asyncio event loop 跑會 block 整個 bridge
+    - 跑在獨立 thread + asyncio.Queue.put_nowait_from_thread 推 queue 把 sync/async 邊界切乾淨
+    """
+    logger.info(f"[system_events] consumer thread 啟動 address={client.address}")
+    try:
+        for i, event in enumerate(client.subscribe_events_sync([])):
+            logger.info(f"[system_events] got event #{i}: {event.get('event_type')} {event.get('data')}")
+            # 用 call_soon_threadsafe 從其他 thread 安全推 asyncio queue
+            loop.call_soon_threadsafe(_event_queue.put_nowait, event)
+    except Exception as e:
+        logger.warning(f"[system_events] consumer thread 例外: {type(e).__name__}: {e}")
+    logger.info("[system_events] consumer thread 退出")
+
+
+async def _consume_system_events() -> None:
+    """背景 task：從 queue 收 events → log + 廣播給所有 WS clients
+
+    給 K8 KPI 鋪路（subsystem 死掉 → Mao 切 fallback 表情 < 3s）
+
+    重要：給 consumer 自己一個 RuntimeClient 實例、不共用 state.runtime 的 channel。
+    原因：gRPC sync streaming 跟 unary call 共享 channel 有時會出 Channel closed 問題。
+    """
+    if state.runtime is None or not state.runtime.enabled:
+        logger.info("[system_events] runtime client disabled、consumer 不啟動")
+        return
+
+    # 給 consumer 自己一個 RuntimeClient（獨立 channel、避免跟 state.runtime 的
+    # is_connected() 共用 channel 造成 CANCELLED）
+    consumer_client = RuntimeClient(
+        address=state.runtime.address,
+        enabled=True,
+        timeout_sec=2.0,
+    )
+    loop = asyncio.get_running_loop()
+
+    # lazy 創建 queue（要等 event loop 在跑）
+    global _event_queue
+    if _event_queue is None:
+        _event_queue = asyncio.Queue(maxsize=1000)
+
+    logger.info(f"[system_events] consumer 用獨立 client {id(consumer_client)} address={consumer_client.address}")
+
+    # 啟動同步 gRPC streaming thread
+    t = threading.Thread(
+        target=_event_consumer_thread,
+        args=(consumer_client, loop),
+        daemon=True,
+        name="system-event-consumer",
+    )
+    t.start()
+
+    while True:
+        try:
+            # 從 asyncio queue 直接 await（不用 executor）
+            event = await _event_queue.get()
+            logger.info(f"[system_events] consume 從 queue 拿到 event: {event.get('event_type')}")
+            await _broadcast_system_event(event)
+        except Exception as e:
+            logger.warning(f"[system_events] consume 例外: {type(e).__name__}: {e}")
+            await asyncio.sleep(1)
+
+
+async def _broadcast_system_event(event: dict) -> None:
+    """廣播 system event 給所有已連線的 WS clients
+
+    WS message 格式（給 Unity 端用）：
+        {
+            "type": "system_event",
+            "event_type": "service.restarted",
+            "data": {"name": "bridge", "pid": "12345", "count": "2"},
+            "timestamp_ms": 1234567890,
+        }
+
+    Unity 端看到 service.restarted / service.failed / service.stopped
+    → Mao 切 thinking 或 sad 表情、UI 顯示「siro reloading...」
+    看到 kiosk.enabled / kiosk.disabled → 鎖/解鍵盤（Phase 4 接）
+    """
+    event_type = event.get("event_type", "unknown")
+    data = event.get("data", {})
+    logger.info(f"[system_event] {event_type} {data}")
+
+    # 組 WS 訊息
+    msg = {
+        "type": "system_event",
+        "event_type": event_type,
+        "data": data,
+        "timestamp_ms": event.get("timestamp_ms", 0),
+    }
+
+    # 複製 WS 清單（避免 send_json 過程中有人斷線）
+    async with state.ws_lock:
+        targets = list(state.connected_websockets)
+
+    if not targets:
+        return
+
+    # 對每個 WS 推（個別失敗不影響其他）
+    for ws in targets:
+        try:
+            await ws.send_json(msg)
+        except Exception as e:
+            # WS 可能已斷線、silent drop
+            logger.debug(f"[system_event] 推給某 WS 失敗（可能已斷線）: {e}")
 
 
 def _build_parser_for_persona(persona_name: str) -> EmotionParser:
@@ -286,6 +408,10 @@ async def lifespan(app: FastAPI):
                 f"  siro-runtime: ✗ 連不上 {state.runtime.address}（siro-runtime 沒跑？"
                 f"Phase 3 驗收 (4) 暫不通）"
             )
+        # v0.3.0：背景 task 訂 siro-runtime events、廣播給 WS clients
+        # （K8 KPI 鋪路：subsystem 死掉 → Mao 在 < 3s 收到 siro reloading）
+        asyncio.create_task(_consume_system_events())
+        logger.info("  system_event consumer 已啟動（背景訂 siro-runtime events 廣播給 WS）")
     else:
         logger.info("  siro-runtime: disabled（SIRO_RUNTIME_ENABLED=true 啟用）")
 
@@ -1400,6 +1526,7 @@ async def websocket_endpoint(websocket: WebSocket):
         發送: {"type": "chat", "message": "...", "user_id": "..."}
         接收: {"type": "response", "text": "...", "emotion": "...", "live2d": {...}}
         接收: {"type": "error", "detail": "..."}
+        接收: {"type": "system_event", "event_type": "...", "data": {...}, "timestamp_ms": ...}  # v0.3.0
 
     降級策略（GAPS.md #4 + #9）：
     - Bridge 內部沒初始化 → 關連線（這是 bug）
@@ -1411,9 +1538,18 @@ async def websocket_endpoint(websocket: WebSocket):
     - 跟 /chat 共用 `create_llm_reply_task()` factory（無重複）
     - 預設 false（行為跟 v0.2 相同、165+ 既有測試不動）
     - Timeout / failed 都走 fallback response、WS 連線不中斷
+
+    v0.3.0：system_event 廣播
+    - SIRO_RUNTIME_ENABLED=true → background task 訂 siro-runtime events
+    - 收到後 broadcast 給所有 state.connected_websockets
+    - Unity 收到 service.restarted / failed → 切 thinking / sad 表情
     """
     await websocket.accept()
     logger.info(f"🔌 WebSocket 連線: {websocket.client}")
+
+    # v0.3.0：加進連線清單（給 system_event 廣播用）
+    async with state.ws_lock:
+        state.connected_websockets.add(websocket)
 
     if not state.hermes or not state.parser:
         await websocket.send_json({"type": "error", "detail": "Bridge 尚未初始化"})
@@ -1474,6 +1610,10 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_json({"type": "error", "detail": str(e)})
         except Exception:
             pass
+    finally:
+        # v0.3.0：從連線清單移除（不管怎麼離開都做）
+        async with state.ws_lock:
+            state.connected_websockets.discard(websocket)
 
 
 # ==================== 入口 ====================

@@ -138,7 +138,7 @@ class RuntimeClient:
             self._stub = siro_pb2_grpc.SiroRuntimeStub(self._channel)
             return self._stub
         except Exception as e:
-            logger.warning(f"建立 gRPC channel 失敗: {e}")
+            logger.warning(f"建立 gRPC channel 失敗: {type(e).__name__}: {e}")
             return None
 
     def is_connected(self) -> bool:
@@ -368,6 +368,40 @@ class RuntimeClient:
                 logger.debug(f"channel.close() 失敗: {e}")
             self._channel = None
             self._stub = None
+
+    def subscribe_events_sync(
+        self,
+        event_types: Optional[list[str]] = None,
+        deadline_sec: Optional[float] = None,
+    ):
+        """同步版 server-streaming 訂閱（給 background thread 用）"""
+        if not self.enabled:
+            return
+        if event_types is None:
+            event_types = []
+        stub = self._ensure_stub()
+        if stub is None:
+            return
+
+        # server-streaming RPC 的 timeout 是「整個 call 的 deadline」
+        # 用 1 天 = 86400s 當 long-lived stream 用
+        # bridge 重啟或 siro-runtime 重啟會自然斷線、這時 consumer 會 retry
+        stream_timeout = 86400.0
+
+        try:
+            request = siro_pb2.EventFilter(event_types=event_types)
+            for event in stub.SubscribeEvents(request, timeout=stream_timeout):
+                yield {
+                    "event_type": event.event_type,
+                    "data": dict(event.data),
+                    "timestamp_ms": event.timestamp_ms,
+                }
+        except grpc.RpcError as e:
+            logger.warning(
+                f"subscribe_events_sync RPC 失敗: {e.code().name}: {e.details()}"
+            )
+        except Exception as e:
+            logger.warning(f"subscribe_events_sync 例外: {type(e).__name__}: {e}")
 
 
 # ============================================================

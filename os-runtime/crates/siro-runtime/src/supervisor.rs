@@ -372,6 +372,15 @@ impl Supervisor {
         if let Some(info) = services_lock.get_mut(name) {
             info.status = ServiceStatus::Stopped;
         }
+        // v0.3.0：推 service.stopped event
+        self.buses.logs.publish(LogEntry::now(
+            name,
+            "info",
+            format!("{} 手動 stop", name),
+        ));
+        self.buses.events.publish(RuntimeEvent::ServiceStopped {
+            name: name.to_string(),
+        });
         Ok(())
     }
 
