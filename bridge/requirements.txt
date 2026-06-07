@@ -20,6 +20,11 @@ pyyaml>=6.0          # Persona YAML 解析 (Phase 1.5+)
 # 沒裝也能跑，會 graceful 退回 char-level substring matching
 jieba>=0.42.0
 
+# gRPC — Phase 3 bridge ↔ siro-runtime 介面（runtime_client.py）
+# 沒裝也不會炸：client 是 opt-in（SIRO_RUNTIME_ENABLED=true 才會實際 import）
+grpcio>=1.60.0
+grpcio-tools>=1.60.0   # codegen for proto → Python stubs
+
 # 測試
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

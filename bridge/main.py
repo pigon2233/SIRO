@@ -40,6 +40,7 @@ from .agent_os import AgentOS, Event  # v0.2+ 後台作業系統
 from .tasks import create_llm_reply_task  # v0.3 AgentOS 接 endpoint
 from .tasks import get_task, register_builtin_tasks  # v1.2 SendTask infra
 from .telegram_bot import TelegramBot, create_telegram_bot_from_env  # v1.0 Telegram 整合
+from .runtime_client import RuntimeClient, get_runtime_client  # v0.3.0 Phase 3 siro-runtime gRPC client
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -135,6 +136,8 @@ class BridgeState:
         self.active_persona: str = "siro-default"
         # v1.0+：Telegram bot（polling 模式、從 TELEGRAM_BOT_TOKEN env 啟動）
         self.telegram_bot: Optional[TelegramBot] = None
+        # v0.3.0：Phase 3 siro-runtime gRPC client（SIRO_RUNTIME_ENABLED=true 才會真的連）
+        self.runtime: Optional[RuntimeClient] = None
 
 
 state = BridgeState()
@@ -270,11 +273,29 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("  Telegram bot: 未設 TELEGRAM_BOT_TOKEN、跳過")
 
+    # v0.3.0：Phase 3 siro-runtime gRPC client
+    # SIRO_RUNTIME_ENABLED=true 時才會真的去連 siro-runtime
+    # 預設 disabled（不影響現有 Phase 1/2 行為）
+    state.runtime = get_runtime_client()
+    if state.runtime.enabled:
+        # 嘗試探測一次（不阻塞 startup，失敗就 log warning）
+        if state.runtime.is_connected():
+            logger.info(f"  siro-runtime: ✓ 連線成功 ({state.runtime.address})")
+        else:
+            logger.warning(
+                f"  siro-runtime: ✗ 連不上 {state.runtime.address}（siro-runtime 沒跑？"
+                f"Phase 3 驗收 (4) 暫不通）"
+            )
+    else:
+        logger.info("  siro-runtime: disabled（SIRO_RUNTIME_ENABLED=true 啟用）")
+
     yield
 
     # 關閉
     if state.telegram_bot:
         await state.telegram_bot.stop()
+    if state.runtime:
+        state.runtime.close()
     if state.agent_os:
         await state.agent_os.stop()
     logger.info("🛑 SIRO Bridge 關閉")
@@ -579,6 +600,55 @@ async def health() -> HealthResponse:
         hermes_available=hermes_available,
         hermes_version=hermes_version,
     )
+
+
+@app.get("/runtime/status")
+async def runtime_status() -> dict:
+    """siro-runtime 系統狀態（Phase 3 驗收 (4) 用）
+
+    回傳：
+    - enabled: RuntimeClient 是否啟用（SIRO_RUNTIME_ENABLED）
+    - address: 目標 gRPC 位址
+    - connected: 目前連得上嗎
+    - services: 每個 service 的狀態（如果連得上）
+    - hardware: CPU/記憶體資訊（如果連得上）
+    - runtime_health: siro-runtime 自己的 health RPC 結果
+    - bridge_health: bridge 對 siro-runtime 的看法（from 自己的 is_connected）
+    """
+    if state.runtime is None:
+        return {
+            "enabled": False,
+            "address": None,
+            "connected": False,
+            "reason": "runtime client not initialized",
+        }
+
+    enabled = state.runtime.enabled
+    address = state.runtime.address
+    connected = state.runtime.is_connected() if enabled else False
+
+    result = {
+        "enabled": enabled,
+        "address": address,
+        "connected": connected,
+    }
+
+    if not enabled:
+        result["reason"] = "disabled（SIRO_RUNTIME_ENABLED=true 啟用）"
+        return result
+
+    if not connected:
+        result["reason"] = "siro-runtime 連不上"
+        return result
+
+    # 連得上時多塞一些資訊（每次都打 gRPC、會慢一點但 endpoint 本身就 debug 用）
+    status = state.runtime.get_status()
+    hardware = state.runtime.get_hardware_info()
+    health_info = state.runtime.health()
+    result["services"] = status.get("services", {})
+    result["hardware"] = hardware
+    result["runtime_health"] = health_info
+    return result
 
 
 @app.get("/personas", response_model=PersonaListResponse)
