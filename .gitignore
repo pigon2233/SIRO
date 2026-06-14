@@ -120,3 +120,9 @@ $RECYCLE.BIN/
 
 # User-specific bridge config (template is bridge.config.ps1.example)
 bridge.config.ps1
+
+# ============ Local LLM artifacts ============
+# HF model weights (gemma / llama / qwen etc) and Ollama custom Modelfiles
+# 別 commit 進 git、太肥、也避免授權風險
+models/
+ollama/

@@ -230,9 +230,13 @@ class EmotionParser:
         match = EMOTION_TAG_PATTERN.search(agent_response)
         if match:
             emotion_str = match.group(1).lower()
-            try:
-                emotion = Emotion(emotion_str)
-            except ValueError:
+            for try_emotion in (emotion_str, emotion_str[: len(emotion_str) // 2]):
+                try:
+                    emotion = Emotion(try_emotion)
+                    break
+                except ValueError:
+                    continue
+            else:
                 logger.warning(f"未知的情緒標籤: {emotion_str}，改用備援")
                 emotion = self._fallback_keyword(agent_response)
         else:
