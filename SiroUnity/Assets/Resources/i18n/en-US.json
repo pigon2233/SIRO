@@ -1,0 +1,19 @@
+{
+    "ui.input.placeholder": "Type a message...",
+    "ui.connect.waiting": "(Waiting for connection...)",
+    "ui.connect.disconnected": "(Not connected to bridge. Is bridge/main.py running?)",
+    "ui.connect.connected": "(Connected. Type a message to start chatting.)",
+    "ui.connect.reconnecting": "(Reconnecting...)",
+    "ui.connect.reconnect_attempt": "(Reconnecting... attempt {0})",
+    "ui.send.thinking": "(Thinking...)",
+    "ui.send.error_prefix": "[Error]",
+    "ui.send.unknown_error": "Unknown error",
+    "ui.persona.loading": "(Loading...)",
+    "ui.persona.role": "Persona: {0}",
+    "ui.persona.dropdown_loading": "(Loading...)",
+    "ui.confirm.title": "SIRO needs your confirmation",
+    "ui.confirm.allow": "Allow",
+    "ui.confirm.deny": "Deny",
+    "ui.confirm.timeout_msg": "Auto-deny in {0}s",
+    "ui.confirm.queued": "({0} more requests queued)"
+}

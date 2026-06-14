@@ -136,6 +136,35 @@ namespace Siro
         }
     }
 
+    /// <summary>
+    /// v1.5+ Computer control confirmation request
+    /// bridge 端 SIRO 想跑危險操作時推 {"type":"confirmation_request",...}
+    /// Unity 顯示 modal dialog、按「允許」/「拒絕」、推 confirmation_response 回 bridge
+    /// </summary>
+    [Serializable]
+    public class BridgeConfirmationRequest
+    {
+        public string type;              // 永遠 "confirmation_request"
+        public string confirmation_id;   // bridge 產生的 uuid, 回 response 要帶這個
+        public string tool;              // e.g. "run_shell_cmd"、"request_confirmation"、"delete_memory"
+        public JObject args;             // tool 參數（給 UI 顯示用, e.g. {"cmd":"apt install ..."}）
+        public string description;       // 人話描述（給 user 看的）
+        public float timeout_sec;        // 60s 沒回就 auto-reject
+    }
+
+    /// <summary>
+    /// v1.5+ confirmation response ack
+    /// bridge 收到 confirmation_response 後會推 {"type":"confirmation_acked",...}
+    /// 告訴 Unity 這個 id 已經被處理（給 UI 關 dialog 用）
+    /// </summary>
+    [Serializable]
+    public class BridgeConfirmationAcked
+    {
+        public string type;              // 永遠 "confirmation_acked"
+        public string confirmation_id;
+        public bool resolved;            // True = 找到並 resolve、False = id 不存在或重複
+    }
+
     public class HermesBridgeClient : MonoBehaviour
     {
         [Header("Server")]
@@ -177,6 +206,9 @@ namespace Siro
         public event Action<BridgeTaskResult> OnTaskResult;  // v1.2 SendTask 成功
         public event Action<BridgeTaskFailed> OnTaskFailed;  // v1.2 SendTask 失敗
         public event Action<BridgeMotionPlay> OnBridgeMotionPlay;  // v1.5+ LLM play_motion tool
+        public event Action<BridgeConfirmationRequest> OnBridgeConfirmationRequest;  // v1.5+ 危險操作前詢問
+        public event Action<BridgeConfirmationAcked> OnBridgeConfirmationAcked;     // v1.5+ confirmation_response 被收到
+        public event Action<JObject> OnBridgeToolAction;  // v1.5+ agent loop 過程中每個 tool call 的即時 event
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
         public event Action<int> OnReconnectAttempt;  // 參數：第 N 次嘗試
@@ -422,6 +454,31 @@ namespace Siro
             _reconnectCoroutine = StartCoroutine(ReconnectLoop());
         }
 
+        /// <summary>
+        /// v1.5+ Computer control：回應 confirmation request
+        /// 給 ConfirmationDialogUI 按鈕呼叫
+        /// </summary>
+        /// <param name="confirmationId">從 BridgeConfirmationRequest.confirmation_id 拿</param>
+        /// <param name="approved">True=允許 SIRO 跑這個操作、False=拒絕</param>
+        public async Task SendConfirmationResponse(string confirmationId, bool approved)
+        {
+            if (string.IsNullOrEmpty(confirmationId))
+            {
+                Debug.LogWarning("[HermesBridge] SendConfirmationResponse: confirmation_id 為空");
+                return;
+            }
+            var payload = new JObject
+            {
+                ["type"] = "confirmation_response",
+                ["confirmation_id"] = confirmationId,
+                ["approved"] = approved,
+            };
+            await SendJsonAsync(payload);
+            if (verboseLogging) Debug.Log(
+                $"[HermesBridge] confirmation_response id={confirmationId} approved={approved}"
+            );
+        }
+
         private void StopReconnect()
         {
             if (_reconnectCoroutine != null)
@@ -640,6 +697,42 @@ namespace Siro
                             }
                         }
                         OnTaskFailed?.Invoke(tFail);
+                        break;
+
+                    case "confirmation_request":
+                        // v1.5+ SIRO 想跑危險操作（shell install / delete memory / 任何 confirm 類 tool）
+                        // 訂閱者（ConfirmationDialogUI）顯示 modal dialog、按按鈕後呼叫 SendConfirmationResponse
+                        var confReq = j.ToObject<BridgeConfirmationRequest>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] confirmation_request id={confReq.confirmation_id} tool={confReq.tool} desc={confReq.description}"
+                        );
+                        OnBridgeConfirmationRequest?.Invoke(confReq);
+                        break;
+
+                    case "confirmation_acked":
+                        // v1.5+ bridge 收到 confirmation_response 後 ack — UI 可以關掉 dialog
+                        var confAck = j.ToObject<BridgeConfirmationAcked>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] confirmation_acked id={confAck.confirmation_id} resolved={confAck.resolved}"
+                        );
+                        OnBridgeConfirmationAcked?.Invoke(confAck);
+                        break;
+
+                    case "tool_action":
+                        // v1.5+ agent mode：SIRO 跑每個 tool 時即時推（給 UI 做 tool-call feed）
+                        var toolAct = (JObject)j.DeepClone();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] tool_action: {toolAct["tool"]} ok={toolAct["ok"]} ({toolAct["duration_ms"]}ms)"
+                        );
+                        OnBridgeToolAction?.Invoke(toolAct);
+                        break;
+
+                    case "system_event":
+                        // v0.3.0 Phase 3 siro-runtime → bridge → Unity WS 的 system event
+                        // 留 default log 給既有訂閱者接（不在這檔處理細節）
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] system_event: {j["event_type"]} data={j["data"]}"
+                        );
                         break;
 
                     case "error":

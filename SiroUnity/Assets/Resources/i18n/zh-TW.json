@@ -10,5 +10,10 @@
     "ui.send.unknown_error": "未知錯誤",
     "ui.persona.loading": "（載入中...）",
     "ui.persona.role": "角色:{0}",
-    "ui.persona.dropdown_loading": "（載入中...）"
+    "ui.persona.dropdown_loading": "（載入中...）",
+    "ui.confirm.title": "SIRO 需要你的確認",
+    "ui.confirm.allow": "允許",
+    "ui.confirm.deny": "拒絕",
+    "ui.confirm.timeout_msg": "{0}s 後自動拒絕",
+    "ui.confirm.queued": "（還有 {0} 個請求排隊中）"
 }
