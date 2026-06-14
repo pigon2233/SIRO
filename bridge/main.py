@@ -18,7 +18,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 # Windows console 預設 cp950 會解錯 hermes 的 UTF-8 輸出
 # 強制整個 process 用 UTF-8
@@ -42,6 +42,7 @@ from .tasks import create_llm_reply_task  # v0.3 AgentOS 接 endpoint
 from .tasks import get_task, register_builtin_tasks  # v1.2 SendTask infra
 from .telegram_bot import TelegramBot, create_telegram_bot_from_env  # v1.0 Telegram 整合
 from .runtime_client import RuntimeClient, get_runtime_client  # v0.3.0 Phase 3 siro-runtime gRPC client
+from .confirmation import ConfirmationBroker  # v1.5+ computer control confirmation broker
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -121,6 +122,15 @@ class BridgeState:
         # false → 走原本 regex parse [emotion:xxx] 文字
         # 注意：tool calling 路徑會自動啟用（前提是 use_streaming 也是 true）
         self.use_tool_calling = os.environ.get("SIRO_USE_TOOL_CALLING", "true").lower() == "true"
+        # v1.5+：computer control agent mode（multi-turn tool_use/tool_result loop）
+        # 跟上面的 use_tool_calling 差別：
+        #   - use_tool_calling=true → single-turn、LLM 選 set_mood / play_motion
+        #   - use_agent_mode=true → multi-turn、LLM 可以 call 任何 15 個 tool、
+        #     tool 結果會回傳給 LLM 繼續（最多 5 輪）
+        # 用法：SIRO_USE_AGENT_MODE=false 關（預設 true、給 SIRO computer control 權限）
+        # 預設 true（v1.5+ Computer Control 完成後的預設行為、2026-06-08 翻預設）
+        # 想「降回原本純 chat」可以設 SIRO_USE_AGENT_MODE=false
+        self.use_agent_mode = os.environ.get("SIRO_USE_AGENT_MODE", "true").lower() == "true"
         # v0.2+：sessions_lock 保護多 thread / 多 request 並行讀寫
         # 雖然單 process + asyncio 已經序列化大部分 access，但
         # 1. tasks 在 worker thread pool（to_thread）執行
@@ -142,6 +152,9 @@ class BridgeState:
         # v0.3.0：追蹤所有已連線的 WebSocket（給 system_event 廣播用）
         self.connected_websockets: Set = set()
         self.ws_lock = asyncio.Lock()  # 保護 connected_websockets 新增/移除
+        # v1.5+：Confirmation broker — SIRO 危險操作前問 user
+        # 初始化在 lifespan 內（要等 WS 連上才能廣播）
+        self.confirmation_broker: Optional[ConfirmationBroker] = None
 
 
 state = BridgeState()
@@ -374,10 +387,13 @@ async def lifespan(app: FastAPI):
     )
     if state.use_streaming:
         logger.info(
-            f"  MiniMaxStreamingClient is_available: {state.streaming_client.is_available}"
+            f"  MiniMaxStreamingClient provider: {state.streaming_client.provider} is_available: {state.streaming_client.is_available}"
         )
     logger.info(
         f"  /ws LLM tool calling: {state.use_tool_calling}（v1.5+、SIRO_USE_TOOL_CALLING=false 可降回 regex parse）"
+    )
+    logger.info(
+        f"  /ws computer control agent mode: {state.use_agent_mode}（v1.5+、SIRO_USE_AGENT_MODE=false 降回純 chat）"
     )
 
     # v1.2+：註冊 SendTask 內建 task handlers
@@ -426,6 +442,23 @@ async def lifespan(app: FastAPI):
         logger.info("  system_event consumer 已啟動（背景訂 siro-runtime events 廣播給 WS）")
     else:
         logger.info("  siro-runtime: disabled（SIRO_RUNTIME_ENABLED=true 啟用）")
+
+    # v1.5+ computer control：confirmation broker + tool action 廣播
+    # 初始化在這裡、因為需要 _broadcast_system_event 已存在
+    # v1.5.2 翻預設：trust_mode=true（user 說他要完整電腦控制權限、不想一直被問）
+    # 想「降回保守模式」設 SIRO_TRUST_MODE=false
+    trust_mode = os.environ.get("SIRO_TRUST_MODE", "true").lower() == "true"
+    state.confirmation_broker = ConfirmationBroker(
+        broadcaster=_broadcast_system_event,  # 複用 WS 廣播、未來可拆
+        timeout_sec=float(os.environ.get("SIRO_CONFIRMATION_TIMEOUT_SEC", "60.0")),
+        trust_mode=trust_mode,
+    )
+    if trust_mode:
+        logger.warning(
+            "  ⚠ TRUST MODE 啟動（預設）：blocklist + confirmation 都跳過、SIRO 完全自主（保留 sandbox + rate limit + audit log）"
+        )
+    else:
+        logger.info("  confirmation broker 已啟動（v1.5+ 危險操作前會問 user）— SIRO_TRUST_MODE=true 可開 trust mode")
 
     yield
 
@@ -789,6 +822,174 @@ async def runtime_status() -> dict:
     return result
 
 
+# ==================== v1.5+ Computer control observability ====================
+
+@app.get("/siro/actions")
+async def siro_actions(limit: int = 50) -> dict:
+    """列出最近 SIRO 工具 actions（給 observability 用）
+
+    Args:
+        limit: 最多回幾條（預設 50、最大 500）
+
+    Returns:
+        {
+            "count": N,
+            "actions": [
+                {
+                    "timestamp": "2026-06-08T...",
+                    "user_id": "...",
+                    "tool": "run_shell_cmd",
+                    "args": {...},
+                    "result": "ok" / "denied" / "error",
+                    "user_confirmed": bool,
+                    "duration_ms": int,
+                    ...
+                },
+                ...
+            ]
+        }
+    """
+    from .security import get_audit_log
+    limit = max(1, min(int(limit), 500))
+    audit = get_audit_log()
+    actions = audit.read_recent(limit=limit)
+    return {
+        "count": len(actions),
+        "actions": actions,
+    }
+
+
+@app.get("/siro/memories")
+async def siro_memories(query: Optional[str] = None, limit: int = 20) -> dict:
+    """列出 / 搜尋 SIRO 長期記憶
+
+    Args:
+        query: 模糊搜尋字串（optional）
+        limit: 最多回幾條（預設 20、最大 100）
+
+    Returns:
+        {
+            "count": N,
+            "memories": [
+                {"id": "...", "timestamp": "...", "content": "...", "tags": [...], "importance": 0.5},
+                ...
+            ]
+        }
+    """
+    from .tools.memory import recall_memory as _recall, list_memories as _list
+    limit = max(1, min(int(limit), 100))
+
+    if query and query.strip():
+        result = await _recall({"query": query, "limit": limit}, {})
+    else:
+        result = await _list({"limit": limit}, {})
+
+    if not result.get("ok"):
+        return {"count": 0, "memories": [], "error": result.get("error")}
+
+    return {
+        "count": result.get("count", 0),
+        "query": query,
+        "memories": result.get("memories", []),
+    }
+
+
+@app.get("/siro/tools")
+async def siro_tools() -> dict:
+    """列出所有 v1.5+ 啟用的 SIRO 工具（給前端 debug / 教學用）"""
+    from .tools import get_available_tools
+    tools = get_available_tools()
+    return {
+        "count": len(tools),
+        "tools": [
+            {
+                "name": t["name"],
+                "description": t.get("description", "")[:200],
+                "category": (
+                    "SendTask" if t["name"] in ("set_mood", "play_motion")
+                    else None
+                ),
+            }
+            for t in tools
+        ],
+    }
+
+
+# ============================================================
+# v1.5+ Free Exploration mode（24/7 自主探索）
+# ============================================================
+
+@app.post("/siro/explore/start")
+async def siro_explore_start(
+    interval_sec: float = 300.0,
+    max_iter: int = 3,
+) -> dict:
+    """啟動 SIRO 24/7 自由探索
+
+    SIRO 會在 sandbox 內自主決定要做什麼、靠本地小模型（qwen2.5:3b）跑
+    不燒 token 也能探索
+
+    Args:
+        interval_sec: 兩次探索 session 的間隔（預設 5 分鐘）
+        max_iter: 每次 session 最多幾輪 tool calls（預設 3）
+    """
+    from .free_exploration import (
+        FreeExplorationScheduler,
+        get_exploration_scheduler,
+    )
+    scheduler = get_exploration_scheduler()
+    if scheduler is None:
+        scheduler = FreeExplorationScheduler(
+            state=state,
+            interval_sec=interval_sec,
+            max_iter_per_session=max_iter,
+        )
+        from .free_exploration import set_exploration_scheduler
+        set_exploration_scheduler(scheduler)
+    else:
+        # 更新間隔
+        scheduler.interval_sec = interval_sec
+        scheduler.max_iter_per_session = max_iter
+    return scheduler.start()
+
+
+@app.post("/siro/explore/stop")
+async def siro_explore_stop() -> dict:
+    """暫停 SIRO 自由探索"""
+    from .free_exploration import get_exploration_scheduler
+    scheduler = get_exploration_scheduler()
+    if scheduler is None:
+        return {"ok": False, "error": "scheduler 沒初始化"}
+    return scheduler.stop()
+
+
+@app.get("/siro/explore/status")
+async def siro_explore_status() -> dict:
+    """看 SIRO 自由探索的狀態"""
+    from .free_exploration import get_exploration_scheduler
+    scheduler = get_exploration_scheduler()
+    if scheduler is None:
+        return {"initialized": False, "running": False}
+    s = scheduler.get_status()
+    s["initialized"] = True
+    return s
+
+
+@app.get("/siro/explore/log")
+async def siro_explore_log(limit: int = 20) -> dict:
+    """看 SIRO 自由探索的 log"""
+    from .free_exploration import get_exploration_scheduler
+    scheduler = get_exploration_scheduler()
+    if scheduler is None:
+        return {"count": 0, "entries": [], "error": "scheduler 沒初始化"}
+    entries = scheduler.read_recent(limit=limit)
+    return {"count": len(entries), "entries": entries}
+
+
+# ============================================================
+# 端點（Personas）
+# ============================================================
+
 @app.get("/personas", response_model=PersonaListResponse)
 async def get_personas() -> PersonaListResponse:
     """列出所有可用的 persona（v1 多角色切換用）
@@ -876,24 +1077,38 @@ async def chat(req: ChatRequest) -> ChatResponse:
     parser = _build_parser_for_persona(persona_name)
     t_parser = time.time() - t0
 
-    # 段 2: hermes is_available — 改用 asyncio.to_thread 跑 subprocess
-    # 否則會卡 event loop 最多 10s、期間其他 SendTask（mood.set / motion.play
-    # 點 Mao）也跟著被卡到 timeout。5s TTL cache 還在、cache miss 才真的問 hermes。
+    # 段 2: 判斷實際可用的 LLM backend
+    # v1.5.2 fix：原本只看 hermes.is_available()，但 v0.3.1+ streaming_client
+    # (MiniMax / Ollama via OpenAI-compat) 是另一條獨立路徑、根本不依賴 hermes 二進位。
+    # 沒裝 hermes 但 streaming 通，照樣能回 Unity — 不該走 fallback。
+    # 改：列出所有可用 backend，只要「至少一個通」就放行；具體走哪條由後面
+    # (use_streaming / use_tool_calling / use_agent_mode) 決定。
     t0 = time.time()
-    if not await asyncio.to_thread(state.hermes.is_available):
-        t_is_avail = time.time() - t0
+    backend_available = False
+    backend_label = ""
+    if state.use_streaming and state.streaming_client and state.streaming_client.is_available:
+        backend_available = True
+        backend_label = f"streaming({state.streaming_client.model})"
+    if not backend_available and state.ollama and await asyncio.to_thread(state.ollama.is_available):
+        backend_available = True
+        backend_label = f"ollama({state.ollama.model})"
+    if not backend_available and state.hermes and await asyncio.to_thread(state.hermes.is_available):
+        backend_available = True
+        backend_label = "hermes"
+    t_is_avail = time.time() - t0
+    if not backend_available:
         logger.warning(
-            f"⏱ [chat] 段 2 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
+            f"⏱ [chat] 段 2 no LLM backend available ({t_is_avail*1000:.0f}ms) → fallback"
         )
         return await _make_fallback_response(
             user_id=req.user_id,
             session_id=session_id,
             category="error",
             persona_name=persona_name,
-            error_detail="Hermes CLI not available",
+            error_detail="no LLM backend available (streaming/ollama/hermes all down)",
             user_message=req.message,
         )
-    t_is_avail = time.time() - t0
+    logger.info(f"⏱ [chat] 段 2 backend={backend_label} ({t_is_avail*1000:.0f}ms) → 放行")
 
     # 載入對話歷史（簡化版：塞進 prompt 上下文）
     history = state.sessions.get(session_id, [])
@@ -1108,23 +1323,35 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
 
     session_id = f"{user_id}-ws"
 
-    # is_available() — 改用 to_thread 跑 subprocess、不卡 event loop
-    # 不然 SendTask 點 Mao 會被同步 subprocess 卡到 timeout
+    # 段 0: 判斷實際可用的 LLM backend
+    # v1.5.2 fix：原本只看 hermes.is_available()，但 v0.3.1+ streaming_client
+    # (MiniMax / Ollama via OpenAI-compat) 是另一條獨立路徑、根本不依賴 hermes 二進位。
+    # 沒裝 hermes 但 streaming 通，照樣能回 Unity — 不該走 fallback。
+    # 改：列出所有可用 backend，只要「至少一個通」就放行；具體走哪條由後面
+    # (use_streaming / use_tool_calling / use_agent_mode) 決定。
     t0 = time.time()
-    hermes_ok = await asyncio.to_thread(state.hermes.is_available)
+    backend_available = False
+    backend_label = ""
+    if state.use_streaming and state.streaming_client and state.streaming_client.is_available:
+        backend_available = True
+        backend_label = f"streaming({state.streaming_client.model})"
+    if not backend_available and state.ollama and await asyncio.to_thread(state.ollama.is_available):
+        backend_available = True
+        backend_label = f"ollama({state.ollama.model})"
+    if not backend_available and state.hermes and await asyncio.to_thread(state.hermes.is_available):
+        backend_available = True
+        backend_label = "hermes"
     t_is_avail = time.time() - t0
-
-    # 降級路徑：Hermes 不可用就直接走 fallback
-    if not hermes_ok:
+    if not backend_available:
         logger.warning(
-            f"⏱ [ws] 段 is_available={t_is_avail*1000:.0f}ms (false) → fallback"
+            f"⏱ [ws] no LLM backend available ({t_is_avail*1000:.0f}ms) → fallback"
         )
         fallback = await _make_fallback_response(
             user_id=user_id,
             session_id=session_id,
             category="disconnected",
             persona_name=personality,
-            error_detail="Hermes not available",
+            error_detail="no LLM backend available (streaming/ollama/hermes all down)",
             user_message=message,
         )
         await websocket.send_json({
@@ -1136,6 +1363,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
             "session_id": fallback.session_id,
         })
         return
+    logger.info(f"⏱ [ws] backend={backend_label} ({t_is_avail*1000:.0f}ms) → 放行")
 
     # v0.3.1 SSE streaming 路徑（STRATEGIC_NOTES Q2 選項 B）：
     #   - SIRO_STREAMING=true → 走 MiniMaxStreamingClient.chat_stream() 收 SSE
@@ -1144,6 +1372,88 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
     #   - Unity 端目前收到 delta 不 render（v1+ 才接 incremental render）
     #   - 預設 false — 既有測試不動
     t0 = time.time()
+    # v1.5+ Computer control agent mode（multi-turn tool_use/tool_result）
+    # 走 streaming_client.run_agent_loop、可以 call 任何 15 個 tool（含 filesystem / shell / memory）
+    # 跟下面 single-turn tool calling 差別：可以反覆 call tool 直到收工
+    if (
+        state.use_agent_mode
+        and state.use_streaming
+        and state.streaming_client.is_available
+    ):
+        from .tasks.llm_reply_task import create_llm_agent_task
+
+        # 拿 history
+        agent_history = state.sessions.get(session_id, [])
+        agent_history_context = ""
+        if agent_history:
+            agent_history_context = "\n\n最近的對話：\n" + "\n".join(
+                f"使用者: {h['user']}\n你: {h['agent']}" for h in agent_history[-5:]
+            )
+        agent_prompt = f"{agent_history_context}\n\n使用者: {message}" if agent_history_context else message
+        agent_system = get_personality(personality)
+
+        logger.info(f"⏱ [ws] 走 agent mode (v1.5+ computer control)")
+
+        # 走 AgentOS（跟 /chat 一致）→ enqueue task → wait
+        if state.use_agent_os and state.agent_os:
+            task = create_llm_agent_task(
+                state=state,
+                user_id=user_id,
+                message=agent_prompt,
+                persona_name=personality,
+                session_id=session_id,
+            )
+            state.agent_os.enqueue(task)
+            logger.info(f"⏱ [ws] enqueue agent task id={task.id} → 走 AgentOS")
+            agent_result = await state.agent_os.wait_for_task(
+                "llm.reply.agent", task.id, timeout=600.0,
+            )
+            if agent_result is None or "error" in agent_result:
+                error_detail = (
+                    agent_result.get("error", "agent task timeout")
+                    if agent_result else "agent task timeout"
+                )
+                fallback = await _make_fallback_response(
+                    user_id=user_id,
+                    session_id=session_id,
+                    category="error",
+                    persona_name=personality,
+                    error_detail=error_detail,
+                    user_message=message,
+                )
+                await websocket.send_json({
+                    "type": "response",
+                    "text": fallback.text,
+                    "emotion": fallback.emotion.value,
+                    "intensity": fallback.intensity,
+                    "live2d": fallback.live2d.model_dump(),
+                    "session_id": fallback.session_id,
+                })
+                return
+            result = agent_result["result"]
+            logger.info(
+                f"⏱ [ws-agent] user={message[:40]!r} → text={result.get('text','')[:60]!r} "
+                f"iter={result.get('iterations', 0)} tools={result.get('tool_calls', [])}"
+            )
+            # 推 tool_action 給 Unity（每個 tool call 一個 event）
+            for tc in result.get("tool_calls", []):
+                await websocket.send_json({
+                    "type": "tool_action",
+                    "tool": tc.get("tool"),
+                    "args": tc.get("args"),
+                    "ok": tc.get("ok"),
+                    "duration_ms": tc.get("duration_ms"),
+                })
+            await websocket.send_json({
+                "type": "response",
+                "text": result["text"],
+                "emotion": result["emotion"],
+                "intensity": result["intensity"],
+                "live2d": result["live2d"],
+                "session_id": result["session_id"],
+            })
+            return
+
     # v1.5+ LLM tool calling 路徑（tool_use API 選 emotion）
     # 跟下面 streaming 流程幾乎一樣、只是用 chat_stream_with_tools 帶 tools 參數、
     # 解析 tool_use event 直接拿 emotion（不用 regex parse [emotion:xxx] 文字）
@@ -1606,6 +1916,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 #   3. 跑 handler（inline，asyncio.create_task 不卡 WS 接收 loop）
                 #   4. 跑完推 task_result 或 task_failed
                 await _handle_sendtask(websocket, data)
+                continue
+
+            elif msg_type == "confirmation_response":
+                # v1.5+：user 回應 confirmation request
+                # 從 data 拿 confirmation_id + approved、轉給 broker
+                confirmation_id = data.get("confirmation_id", "")
+                approved = bool(data.get("approved", False))
+                if not confirmation_id:
+                    await websocket.send_json({
+                        "type": "error",
+                        "detail": "confirmation_response 缺 confirmation_id",
+                    })
+                    continue
+                if state.confirmation_broker is None:
+                    await websocket.send_json({
+                        "type": "error",
+                        "detail": "confirmation broker 還沒初始化",
+                    })
+                    continue
+                resolved = state.confirmation_broker.resolve(confirmation_id, approved)
+                await websocket.send_json({
+                    "type": "confirmation_acked",
+                    "confirmation_id": confirmation_id,
+                    "resolved": resolved,
+                })
                 continue
 
             else:
