@@ -78,6 +78,31 @@ class SiroRuntimeStub:
                 request_serializer=siro__pb2.EventFilter.SerializeToString,
                 response_deserializer=siro__pb2.SystemEvent.FromString,
                 _registered_method=True)
+        self.ExecuteCommand = channel.unary_unary(
+                '/siro.runtime.v1.SiroRuntime/ExecuteCommand',
+                request_serializer=siro__pb2.CommandRequest.SerializeToString,
+                response_deserializer=siro__pb2.CommandResponse.FromString,
+                _registered_method=True)
+        self.ReadFile = channel.unary_unary(
+                '/siro.runtime.v1.SiroRuntime/ReadFile',
+                request_serializer=siro__pb2.PathRequest.SerializeToString,
+                response_deserializer=siro__pb2.FileContent.FromString,
+                _registered_method=True)
+        self.WriteFile = channel.unary_unary(
+                '/siro.runtime.v1.SiroRuntime/WriteFile',
+                request_serializer=siro__pb2.WriteFileRequest.SerializeToString,
+                response_deserializer=siro__pb2.WriteFileResponse.FromString,
+                _registered_method=True)
+        self.ListDirectory = channel.unary_unary(
+                '/siro.runtime.v1.SiroRuntime/ListDirectory',
+                request_serializer=siro__pb2.PathRequest.SerializeToString,
+                response_deserializer=siro__pb2.DirectoryListing.FromString,
+                _registered_method=True)
+        self.StatPath = channel.unary_unary(
+                '/siro.runtime.v1.SiroRuntime/StatPath',
+                request_serializer=siro__pb2.PathRequest.SerializeToString,
+                response_deserializer=siro__pb2.PathStat.FromString,
+                _registered_method=True)
 
 
 class SiroRuntimeServicer:
@@ -143,6 +168,39 @@ class SiroRuntimeServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExecuteCommand(self, request, context):
+        """v1.5.3 Computer Control — 系統控制層（給 SIRO 透過 bridge 操控 OS）
+        之前 Python 直接 subprocess、現在統一走 gRPC、之後 Phase 4 Linux 部署
+        只要 bridge 透過 network gRPC 連到 os-runtime 就 work
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReadFile(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WriteFile(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListDirectory(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StatPath(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SiroRuntimeServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -185,6 +243,31 @@ def add_SiroRuntimeServicer_to_server(servicer, server):
                     servicer.SubscribeEvents,
                     request_deserializer=siro__pb2.EventFilter.FromString,
                     response_serializer=siro__pb2.SystemEvent.SerializeToString,
+            ),
+            'ExecuteCommand': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteCommand,
+                    request_deserializer=siro__pb2.CommandRequest.FromString,
+                    response_serializer=siro__pb2.CommandResponse.SerializeToString,
+            ),
+            'ReadFile': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadFile,
+                    request_deserializer=siro__pb2.PathRequest.FromString,
+                    response_serializer=siro__pb2.FileContent.SerializeToString,
+            ),
+            'WriteFile': grpc.unary_unary_rpc_method_handler(
+                    servicer.WriteFile,
+                    request_deserializer=siro__pb2.WriteFileRequest.FromString,
+                    response_serializer=siro__pb2.WriteFileResponse.SerializeToString,
+            ),
+            'ListDirectory': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListDirectory,
+                    request_deserializer=siro__pb2.PathRequest.FromString,
+                    response_serializer=siro__pb2.DirectoryListing.SerializeToString,
+            ),
+            'StatPath': grpc.unary_unary_rpc_method_handler(
+                    servicer.StatPath,
+                    request_deserializer=siro__pb2.PathRequest.FromString,
+                    response_serializer=siro__pb2.PathStat.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -407,6 +490,141 @@ class SiroRuntime:
             '/siro.runtime.v1.SiroRuntime/SubscribeEvents',
             siro__pb2.EventFilter.SerializeToString,
             siro__pb2.SystemEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteCommand(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/siro.runtime.v1.SiroRuntime/ExecuteCommand',
+            siro__pb2.CommandRequest.SerializeToString,
+            siro__pb2.CommandResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReadFile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/siro.runtime.v1.SiroRuntime/ReadFile',
+            siro__pb2.PathRequest.SerializeToString,
+            siro__pb2.FileContent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WriteFile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/siro.runtime.v1.SiroRuntime/WriteFile',
+            siro__pb2.WriteFileRequest.SerializeToString,
+            siro__pb2.WriteFileResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListDirectory(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/siro.runtime.v1.SiroRuntime/ListDirectory',
+            siro__pb2.PathRequest.SerializeToString,
+            siro__pb2.DirectoryListing.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StatPath(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/siro.runtime.v1.SiroRuntime/StatPath',
+            siro__pb2.PathRequest.SerializeToString,
+            siro__pb2.PathStat.FromString,
             options,
             channel_credentials,
             insecure,

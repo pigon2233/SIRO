@@ -20,6 +20,10 @@ use tracing::info;
 
 use crate::event_bus::{Buses, LogEntry, RuntimeEvent};
 use crate::supervisor::Supervisor;
+// v1.5.3 Computer Control
+use crate::commands;
+use crate::fs_ops;
+use crate::sandbox;
 
 /// 把 tracing level 字串轉成 number（給 min_level filter 用）
 /// debug=0 / info=1 / warn=2 / error=3
@@ -79,33 +83,10 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
         &self,
         _request: Request<generated::Empty>,
     ) -> Result<Response<generated::HardwareInfo>, Status> {
-        // v0.3.0 簡化：CPU/Mem 資訊用 sysinfo
-        // GPU 跟 audio device 留 v0.4+ 實作
-        use sysinfo::System;
-        let sys = System::new_all();
-        let cpu = generated::CpuInfo {
-            model: sys
-                .cpus()
-                .first()
-                .map(|c| c.brand().to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            cores: sys.physical_core_count().unwrap_or(0) as i32,
-            threads: sys.cpus().len() as i32,
-            frequency_ghz: sys.cpus().first().map(|c| c.frequency() as f32 / 1000.0).unwrap_or(0.0),
-        };
-        let memory = generated::MemoryInfo {
-            // sysinfo 已經回 bytes、不用再乘 1024
-            total_bytes: sys.total_memory() as i64,
-            available_bytes: sys.available_memory() as i64,
-        };
-        Ok(Response::new(generated::HardwareInfo {
-            cpu: Some(cpu),
-            memory: Some(memory),
-            gpu: None,
-            audio: vec![],
-            display: None,
-            cameras: vec![],
-        }))
+        // v0.4+：用 hardware::detect_all() 統一偵測（CPU/memory/GPU/audio/display/cameras）
+        // 失敗時回空、不 panic（production 24/7 跑）
+        let hw = crate::hardware::detect_all();
+        Ok(Response::new(hw.to_proto()))
     }
 
     async fn restart_service(
@@ -246,6 +227,216 @@ impl generated::siro_runtime_server::SiroRuntime for SiroRuntimeServer {
     }
 
     type SubscribeEventsStream = SubscribeEventsStreamType;
+
+    // ============================================================
+    // v1.5.3 Computer Control — 5 個系統控制 RPC
+    //
+    // 給 bridge（透過 gRPC）呼叫、執行 OS 級操作
+    // 所有操作都先過 sandbox.rs 路徑檢查
+    // ============================================================
+
+    async fn execute_command(
+        &self,
+        request: Request<generated::CommandRequest>,
+    ) -> Result<Response<generated::CommandResponse>, Status> {
+        let req = request.into_inner();
+        let sandbox_root = sandbox::get_sandbox_root()
+            .map_err(|e| Status::internal(format!("sandbox root 無效: {}", e)))?;
+
+        // cwd 解析：如果是 "." 或 sandbox root 本身、直接用；其他要 validate 在 sandbox 內
+        let cwd = if req.cwd.is_empty() || req.cwd == "." {
+            sandbox_root.clone()
+        } else {
+            // 接受 absolute path（sandbox 內）或相對路徑
+            let p = std::path::PathBuf::from(&req.cwd);
+            if p.is_absolute() {
+                // absolute → 檢查在 sandbox 內
+                if !p.starts_with(&sandbox_root) {
+                    return Err(Status::invalid_argument(format!(
+                        "cwd 不在 sandbox 內：{}",
+                        req.cwd
+                    )));
+                }
+                p
+            } else {
+                sandbox::resolve_path_lenient(&req.cwd, &sandbox_root)
+                    .map_err(|e| Status::invalid_argument(format!("cwd 解析失敗: {}", e)))?
+            }
+        };
+
+        info!(
+            "[execute_command] user={:?} trust={} cwd={} cmd={}",
+            req.user_id, req.trust_mode, cwd.display(), req.cmd
+        );
+
+        // 推 log 給 audit
+        self.buses.logs.publish(LogEntry::now(
+            "siro-runtime",
+            "info",
+            format!(
+                "[execute_command] user={} cmd={}",
+                req.user_id, req.cmd
+            ),
+        ));
+
+        let result = commands::execute_command(&req.cmd, &cwd, Some(req.timeout_sec.max(0) as u32))
+            .await;
+
+        match result {
+            Ok(r) => Ok(Response::new(generated::CommandResponse {
+                exit_code: r.exit_code,
+                stdout: r.stdout,
+                stderr: r.stderr,
+                stdout_truncated: r.stdout_truncated,
+                stderr_truncated: r.stderr_truncated,
+                duration_ms: r.duration_ms,
+                original_size_stdout: r.original_size_stdout as i32,
+                original_size_stderr: r.original_size_stderr as i32,
+                category: "auto".to_string(),  // v1.5.3 簡化：trust_mode 不擋（blocklist 在 bridge 層做）
+                block_reason: String::new(),
+            })),
+            Err(e) => Err(Status::internal(format!("execute failed: {}", e))),
+        }
+    }
+
+    async fn read_file(
+        &self,
+        request: Request<generated::PathRequest>,
+    ) -> Result<Response<generated::FileContent>, Status> {
+        let req = request.into_inner();
+        let sandbox_root = sandbox::get_sandbox_root()
+            .map_err(|e| Status::internal(format!("sandbox root 無效: {}", e)))?;
+
+        let max_lines = if req.max_lines > 0 { Some(req.max_lines as usize) } else { None };
+
+        info!(
+            "[read_file] user={:?} trust={} path={} max_lines={:?}",
+            req.user_id, req.trust_mode, req.path, max_lines
+        );
+
+        self.buses.logs.publish(LogEntry::now(
+            "siro-runtime",
+            "info",
+            format!("[read_file] user={} path={}", req.user_id, req.path),
+        ));
+
+        match fs_ops::read_file(&req.path, &sandbox_root, max_lines) {
+            Ok(r) => Ok(Response::new(generated::FileContent {
+                path: r.path.to_string_lossy().to_string(),
+                content: r.content,
+                size_bytes: r.size_bytes as i64,
+                truncated: r.truncated,
+                line_count: r.line_count as i32,
+            })),
+            Err(e) => match e {
+                fs_ops::FsError::NotFound(p) => Err(Status::not_found(p)),
+                fs_ops::FsError::Sandbox(s) => Err(Status::invalid_argument(format!("{}", s))),
+                _ => Err(Status::internal(format!("read_file failed: {}", e))),
+            },
+        }
+    }
+
+    async fn write_file(
+        &self,
+        request: Request<generated::WriteFileRequest>,
+    ) -> Result<Response<generated::WriteFileResponse>, Status> {
+        let req = request.into_inner();
+        let sandbox_root = sandbox::get_sandbox_root()
+            .map_err(|e| Status::internal(format!("sandbox root 無效: {}", e)))?;
+
+        info!(
+            "[write_file] user={:?} trust={} path={} bytes={}",
+            req.user_id, req.trust_mode, req.path, req.content.len()
+        );
+
+        self.buses.logs.publish(LogEntry::now(
+            "siro-runtime",
+            "info",
+            format!(
+                "[write_file] user={} path={} bytes={}",
+                req.user_id, req.path, req.content.len()
+            ),
+        ));
+
+        match fs_ops::write_file(&req.path, &req.content, &sandbox_root) {
+            Ok(r) => Ok(Response::new(generated::WriteFileResponse {
+                ok: true,
+                bytes_written: r.bytes_written as i64,
+                error: String::new(),
+            })),
+            Err(e) => match e {
+                fs_ops::FsError::Sandbox(s) => Err(Status::invalid_argument(format!("{}", s))),
+                _ => Ok(Response::new(generated::WriteFileResponse {
+                    ok: false,
+                    bytes_written: 0,
+                    error: format!("{}", e),
+                })),
+            },
+        }
+    }
+
+    async fn list_directory(
+        &self,
+        request: Request<generated::PathRequest>,
+    ) -> Result<Response<generated::DirectoryListing>, Status> {
+        let req = request.into_inner();
+        let sandbox_root = sandbox::get_sandbox_root()
+            .map_err(|e| Status::internal(format!("sandbox root 無效: {}", e)))?;
+
+        info!(
+            "[list_directory] user={:?} path={} recursive={}",
+            req.user_id, req.path, req.recursive
+        );
+
+        self.buses.logs.publish(LogEntry::now(
+            "siro-runtime",
+            "info",
+            format!("[list_directory] user={} path={}", req.user_id, req.path),
+        ));
+
+        match fs_ops::list_directory(&req.path, &sandbox_root, req.recursive) {
+            Ok(r) => Ok(Response::new(generated::DirectoryListing {
+                path: r.path.to_string_lossy().to_string(),
+                entries: r.entries,
+                count: r.count as i32,
+                truncated: r.truncated,
+            })),
+            Err(e) => match e {
+                fs_ops::FsError::NotFound(p) => Err(Status::not_found(p)),
+                fs_ops::FsError::Sandbox(s) => Err(Status::invalid_argument(format!("{}", s))),
+                _ => Err(Status::internal(format!("list_directory failed: {}", e))),
+            },
+        }
+    }
+
+    async fn stat_path(
+        &self,
+        request: Request<generated::PathRequest>,
+    ) -> Result<Response<generated::PathStat>, Status> {
+        let req = request.into_inner();
+        let sandbox_root = sandbox::get_sandbox_root()
+            .map_err(|e| Status::internal(format!("sandbox root 無效: {}", e)))?;
+
+        info!(
+            "[stat_path] user={:?} path={}",
+            req.user_id, req.path
+        );
+
+        match fs_ops::stat_path(&req.path, &sandbox_root) {
+            Ok(r) => Ok(Response::new(generated::PathStat {
+                path: r.path.to_string_lossy().to_string(),
+                exists: r.exists,
+                is_file: r.is_file,
+                is_dir: r.is_dir,
+                size_bytes: r.size_bytes as i64,
+                modified_ms: r.modified_ms,
+            })),
+            Err(e) => match e {
+                fs_ops::FsError::Sandbox(s) => Err(Status::invalid_argument(format!("{}", s))),
+                _ => Err(Status::internal(format!("stat_path failed: {}", e))),
+            },
+        }
+    }
 }
 
 // ============================================================

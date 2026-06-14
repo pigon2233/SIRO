@@ -5,10 +5,16 @@
 //! v0.3.0 (Phase 3 supervisor 啟動): 加上 process supervisor
 //!          監控 bridge / hermes / unity、auto-restart、暴露 gRPC API
 
+mod config;
 mod event_bus;
 mod grpc;
+mod hardware;
 mod services;
 mod supervisor;
+// v1.5.3 Computer Control modules
+mod sandbox;
+mod commands;
+mod fs_ops;
 pub use grpc::generated as proto;
 
 use std::path::PathBuf;
@@ -24,8 +30,12 @@ const NAME: &str = env!("CARGO_PKG_NAME");
 #[derive(Parser, Debug)]
 #[command(name = "siro-runtime", version, about = "SIRO 系統層主 daemon")]
 struct Args {
-    /// 設定檔路徑（v0.3.0 還沒實作讀檔、用預設 services）
-    #[arg(short, long, default_value = "/etc/siro/runtime.toml")]
+    /// 設定檔路徑（v0.4+ 動態偵測、留空用 fallback 順序）
+    /// 1. CLI 參數 `--config /path/to/runtime.toml`
+    /// 2. cwd 下的 `./runtime.toml`
+    /// 3. `/etc/siro/runtime.toml`（Linux 標準）
+    /// 4. 都沒有 → 全部用預設值（向後相容 v0.3.0）
+    #[arg(short, long, default_value = "")]
     config: String,
 
     /// 開啟 verbose log
@@ -60,22 +70,53 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let auto_start = args.auto_start.unwrap_or(true);
 
+    // v0.4+：動態找設定檔（CLI > cwd > /etc/siro > 預設）
+    let config_path = if !args.config.is_empty() {
+        std::path::PathBuf::from(&args.config)
+    } else {
+        // 順序找
+        let candidates = [
+            std::path::PathBuf::from("./runtime.toml"),
+            std::path::PathBuf::from("/etc/siro/runtime.toml"),
+        ];
+        candidates
+            .into_iter()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| std::path::PathBuf::from("/etc/siro/runtime.toml"))
+    };
+    let runtime_config = match config::RuntimeConfig::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("config 解析失敗 {}: {}", config_path.display(), e);
+            return Err(e.into());
+        }
+    };
+
     info!("{} v{} starting up", NAME, VERSION);
-    info!("config path: {}", args.config);
+    info!("config path: {}", config_path.display());
     info!("dry_run: {}", args.dry_run);
-    info!("grpc_addr: {}", args.grpc_addr);
+    info!("grpc_addr: {} (from {})", args.grpc_addr,
+        if runtime_config.server.grpc_addr == args.grpc_addr { "config" } else { "CLI override" });
     info!("auto_start: {}", auto_start);
+    info!("kiosk.enabled: {}", runtime_config.kiosk.enabled);
+    info!("supervisor.check_interval_ms: {}", runtime_config.supervisor.check_interval_ms);
 
     if args.dry_run {
         info!("[dry-run] 不會啟動任何服務");
         println!("siro-runtime v{} (dry-run)", VERSION);
+        println!("  config: {}", config_path.display());
         println!("  would listen gRPC on: {}", args.grpc_addr);
         println!("  would monitor services:");
         let project_root = std::env::current_dir()
             .ok()
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
-        for def in services::default_services(&project_root) {
+        let defs = if runtime_config.services.is_empty() {
+            services::default_services(&project_root)
+        } else {
+            runtime_config.services.clone()
+        };
+        for def in defs {
             println!("    - {} ({} {:?})", def.name, def.command, def.args);
         }
         return Ok(());
@@ -88,8 +129,12 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     info!("project_root: {}", project_root.display());
 
-    // 建立 supervisor（內含 3 個預設 services）
-    let service_defs = services::default_services(&project_root);
+    // v0.4+：優先用 config 裡的 services、沒有就用 default
+    let service_defs = if runtime_config.services.is_empty() {
+        services::default_services(&project_root)
+    } else {
+        runtime_config.services.clone()
+    };
     info!("loaded {} services:", service_defs.len());
     for def in &service_defs {
         info!("  - {} (cmd={} args={:?})", def.name, def.command, def.args);

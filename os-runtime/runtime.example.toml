@@ -1,0 +1,35 @@
+# SIRO runtime config（v0.4+）
+# 安裝時可以 cp 這個範例到 /etc/siro/runtime.toml 再改
+# 找不到這個檔 os-runtime 會用預設值（向後相容 v0.3.0）
+
+[server]
+grpc_addr = "127.0.0.1:50051"
+# unix_socket = "/var/run/siro/runtime.sock"  # optional、給未來 unix domain socket 用
+
+[supervisor]
+check_interval_ms = 1000
+max_restart_attempts = 5      # 0 = 無限
+restart_backoff_ms = 2000
+
+[hardware]
+# audio_device = "default"
+# camera_device = "/dev/video0"
+# display = ":0"
+
+[kiosk]
+enabled = false
+block_keyboard = true
+# escape_password = "siro-admin-2026"
+
+# 自訂 services（不填則用預設 3 個: bridge / hermes / unity）
+# [[services]]
+# name = "my-service"
+# command = "/usr/bin/my-svc"
+# args = ["--config", "/etc/my-svc.conf"]
+# working_dir = "/var/lib/my-svc"
+# auto_restart = true
+# restart_delay_sec = 5
+# health_check_interval_sec = 10
+# max_restarts = 0
+# [services.env]
+# LOG_LEVEL = "info"

@@ -30,9 +30,14 @@ tonic-prost = { workspace = true }
 prost = { workspace = true }
 # v0.3.0：stream_logs / subscribe_events RPC 用的 Stream wrapper
 tokio-stream = { workspace = true }
+# v1.5.3：ExecuteCommand 用 shlex split cmd 字串（防止 shell injection）
+shlex = { workspace = true }
+# v0.4+：設定檔讀寫（figment + TOML）
+figment = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 # 測試用
+tempfile = "3.10"

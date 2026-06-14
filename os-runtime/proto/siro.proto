@@ -38,6 +38,15 @@ service SiroRuntime {
 
   // 訂閱系統事件
   rpc SubscribeEvents(EventFilter) returns (stream SystemEvent);
+
+  // v1.5.3 Computer Control — 系統控制層（給 SIRO 透過 bridge 操控 OS）
+  // 之前 Python 直接 subprocess、現在統一走 gRPC、之後 Phase 4 Linux 部署
+  // 只要 bridge 透過 network gRPC 連到 os-runtime 就 work
+  rpc ExecuteCommand(CommandRequest) returns (CommandResponse);
+  rpc ReadFile(PathRequest) returns (FileContent);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ListDirectory(PathRequest) returns (DirectoryListing);
+  rpc StatPath(PathRequest) returns (PathStat);
 }
 
 // ============================================================
@@ -211,4 +220,81 @@ message SystemEvent {
   string event_type = 1;  // "service.started", "service.failed", "kiosk.enabled", ...
   int64 timestamp_ms = 2;
   map<string, string> data = 3;
+}
+
+// ============================================================
+// v1.5.3 Computer Control — 系統控制層 message types
+//
+// 跟 SIRO_USE_TRUST_MODE 對應：trust_mode=true 時 bridge 端 Python 跳過 blocklist
+// 跟 confirmation、但仍透過 gRPC 走 os-runtime、保留 audit log 路徑
+// ============================================================
+
+// ExecuteCommand: 跑 shell 指令
+message CommandRequest {
+  string cmd = 1;            // 完整指令字串（shlex split in Rust）
+  string cwd = 2;            // 工作目錄（sandbox 路徑 or absolute、要在 sandbox 內）
+  int32 timeout_sec = 3;     // 預設 30、最大 300
+  bool trust_mode = 4;       // 從 bridge 傳過來（純粹 log 用、Rust 端不擋）
+  string user_id = 5;        // 哪個 user 觸發（給 audit log）
+}
+
+message CommandResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+  bool stdout_truncated = 4;
+  bool stderr_truncated = 5;
+  int64 duration_ms = 6;
+  int32 original_size_stdout = 7;  // 截斷前原始大小
+  int32 original_size_stderr = 8;
+  string category = 9;             // "auto" / "confirm" / "block"（給 log 觀察用）
+  string block_reason = 10;        // 當 category=block 時的原因
+}
+
+// 通用 path request（ReadFile / ListDirectory / StatPath 共用）
+message PathRequest {
+  string path = 1;            // 相對於 sandbox 或 absolute
+  bool trust_mode = 2;
+  string user_id = 3;
+  // ReadFile 限定
+  int32 max_lines = 4;        // 預設 200、max 500、0 = unlimited
+  // ListDirectory 限定
+  bool recursive = 5;         // 預設 false
+}
+
+message FileContent {
+  string path = 1;
+  string content = 2;
+  int64 size_bytes = 3;
+  bool truncated = 4;
+  int32 line_count = 5;
+}
+
+message WriteFileRequest {
+  string path = 1;
+  string content = 2;
+  bool trust_mode = 3;
+  string user_id = 4;
+}
+
+message WriteFileResponse {
+  bool ok = 1;
+  int64 bytes_written = 2;
+  string error = 3;
+}
+
+message DirectoryListing {
+  string path = 1;
+  repeated string entries = 2;  // "name" or "name/" 標記 dir
+  int32 count = 3;
+  bool truncated = 4;
+}
+
+message PathStat {
+  string path = 1;
+  bool exists = 2;
+  bool is_file = 3;
+  bool is_dir = 4;
+  int64 size_bytes = 5;
+  int64 modified_ms = 6;
 }
