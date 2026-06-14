@@ -20,6 +20,28 @@ AI 本身就是 OS 的 shell，不是「在 OS 上跑 AI 應用」。
 [角色理解意圖，調用工具、執行動作、回應]
 ```
 
+### v1.5+ 願景：自主 Agent
+
+```
+[SIRO 啟動]
+  ↓
+[給 SIRO 一台空電腦 ~/siro-sandbox/]
+  ↓
+[SIRO 自主探索、累積記憶、養出人格]
+  ↓
+[人格從行為中浮現、跨越幾週/幾月]
+```
+
+**v1.5+ Computer Control** — SIRO 從「chatbot」變成「自主 agent」：
+
+- **15 個 tool** 透過 LLM native tool_use 呼叫（filesystem / shell / memory / meta + set_mood / play_motion）
+- **三層安全護欄** — sandbox path check + rate limit + audit log
+- **Confirmation 機制** — 危險 shell 指令透過 WS 問 user、60s 沒回自動拒絕
+- **長期記憶** — SQLite 持久化、跨 session 累積經驗
+- **Multi-turn agent loop** — LLM 可反覆 call tool 直到收工（最多 5 輪）
+
+詳見 [docs/PLANS/agent-computer-control.md](docs/PLANS/agent-computer-control.md)。
+
 ---
 
 ## 4 層架構
@@ -54,10 +76,11 @@ AI 本身就是 OS 的 shell，不是「在 OS 上跑 AI 應用」。
 
 | Phase | 重點 | 狀態 |
 |-------|------|------|
-| **Phase 0** | 規劃設計、建立結構 | 進行中 |
-| **Phase 1** | Python AI 整合（Hermes + bridge + 文字對話 + Live2D 表情） | 待開始 |
-| **Phase 2** | Live2D 視覺強化（待機動作、表情過渡） | 待開始 |
-| **Phase 3** | Rust 系統層（supervisor、gRPC、硬體抽象） | 待開始 |
+| **Phase 0** | 規劃設計、建立結構 | ✅ |
+| **Phase 1** | Python AI 整合（Hermes + bridge + 文字對話 + Live2D 表情） | ✅ |
+| **Phase 2** | Live2D 視覺強化（待機動作、表情過渡） | ✅ |
+| **Phase 3** | Rust 系統層（supervisor、gRPC、硬體抽象） | ✅ |
+| **v1.5+** | Computer Control（15 個 tool、sandbox、confirmation、long-term memory） | ✅ |
 | **Phase 4** | Linux 客製化（Ubuntu Server 24.04 LTS 雙系統） | 待開始 |
 | **Phase 5** | 硬體整合（音訊、視訊、kiosk 模式） | 待開始 |
 | **Phase 6** | 部署與營運（Packer image、OTA、備份） | 待開始 |

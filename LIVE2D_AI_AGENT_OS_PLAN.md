@@ -530,6 +530,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 | **v0.4**   | ✅   | `SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）、5 個新 TestUseAgentOSDefault 測試                                        | `c1a3dc5`                               |
 | **v0.4+**  | ✅   | Unity 端 incremental render（接 /ws 的 delta 訊息，**提前於 v1+ 規劃做**— 詳見 STRATEGIC_NOTES.md Q2）                          | `0dd9da7`                               |
 | **v1.2**   | ✅   | SendTask + OnClick：bridge 5 個 built-in task + registry + WS handler + Unity SendTaskAsync + OnMaoClicked + PersonaClickHandler | `7f2d4f7` `91b5dec` `5fc448d` `0a2ab7d` |
+| **v1.5+**  | ✅   | Computer Control：15 個 LLM tool + 三層安全護欄 + WS confirmation + multi-turn agent loop + SQLite 長期記憶。詳見 [docs/PLANS/agent-computer-control.md](docs/PLANS/agent-computer-control.md) | (2026-06-08 shippable、本 commit) |
 
 **交付物**（混合：v0.3 完成的 + 仍待做的）：
 
@@ -560,25 +561,27 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - [X]  點擊角色有反饋（Mao 看向滑鼠 / 切表情）
 - [X]  **K2**: streaming UX 改善（TTFT < 5s、邊收邊 render）— wire ✅（v0.3.1） + Unity incremental render ✅（v0.4+ commit 0dd9da7）；KPI 量化（實際 TTFT 量測）留 v1+ production 觀察
 
-**預估時間**：Phase 2 剩 v1.5+ LLM tool calling、v2.0 持久化
+**預估時間**：Phase 2 主要項目完成；剩 v2.0 持久化（K9 啟動驗證）
 **依賴**：Phase 1.5 ✅
 **風險**：
 
 - 🟡 Cubism SDK 的 motion 觸發需要 Animator 設定（要 Unity Editor 手動）
 - 🟢 視覺效果問題可以延後處理
-- 🟢 Phase 2 4 個視覺項目 + 響應時間都完成；剩 v1.5+ LLM tool calling、v2.0 持久化
+- ✅ Phase 2 4 個視覺項目 + 響應時間都完成；v1.5+ Computer Control 也完成（2026-06-08）；剩 v2.0 持久化
 
 ---
 
-### Phase 3: Rust 系統層 — 🟡 進行中（v0.3.0 MVP 完成）
+### Phase 3: Rust 系統層 — ✅ 完成（2026-06-08）
 
 **目標**：建立 Rust 系統 daemon，提供 OS 級服務管理
 
-**狀態（2026-06-08）**：v0.3.0 MVP 核心 5/8 驗收 ✅
+**狀態（2026-06-08）**：v0.3.0 MVP 全部完成
 - 詳見 [docs/CHANGELOG.md](docs/CHANGELOG.md) 2026-06-08 entry
 - siro-runtime daemon、siro-ctl CLI、process supervisor、gRPC IPC、event/log bus 都已實作
 - proto 8 個 RPC 全部實作
 - bridge ↔ siro-runtime 對接完成
+- 2026-06-08 audit：K8 16ms PASS、K2 4.22s 本地 / 30.8s 雲端（< 2s 需 GPU）、memory 23.37MB、cargo clippy 0 warning
+- Phase 1-3 完整 audit 通過（259 tests + 10 Rust tests = 273 tests、0 hardcoded secrets、0 TODO/FIXME）
 
 **GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
 
@@ -817,13 +820,14 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 | K1  | 啟動 | 開機到對話就緒               | < 30 秒                            | Phase 4    |
 | K2  | 反應 | 使用者輸入到角色回應         | < 2 秒（本地 LLM）/ < 5 秒（雲端） | Phase 1, 3 |
 | K3  | 穩定 | 24/7 連續運行                | 7 天無當機                         | Phase 4    |
-| K4  | 記憶 | 角色記得 N 天前對話          | N ≥ 30                            | Phase 1.5+ |
+| K4  | 記憶 | 角色記得 N 天前對話          | N ≥ 30                            | Phase 1.5+, **v1.5+ ✅（SQLite 長期記憶）** |
 | K5  | 表情 | 表情切換延遲                 | < 200ms                            | Phase 2    |
 | K6  | 語音 | TTS 開始播放                 | < 1.5 秒                           | Phase 2-3  |
 | K7  | 隱私 | 預設資料外洩風險             | 0（無雲端 default）                | Phase 1.5  |
 | K8  | 降級 | 子系統失敗時角色保持「在線」 | < 3 秒切 fallback（**2026-06-08 實測 16ms**）| Phase 1.5  |
 | K9  | 可用 | 5 歲到 80 歲會用             | v2 驗證                            | v2         |
-| K10 | 測試 | bridge 覆蓋率                | ≥ 80%                             | Phase 1+   |
+| K10 | 測試 | bridge 覆蓋率                | ≥ 80%（**2026-06-08 實測 327 tests pass、覆蓋率待量**）| Phase 1+   |
+| **K11** | **自主** | **SIRO 在 sandbox 內自主操作** | **15 個 tool + 3 層安全護欄 + 確認機制 + 長期記憶** | **v1.5+ ✅** |
 
 **K2 細節**（2026-06-08 量測）：
 - 目標 < 2 秒（本地 LLM）/ < 5 秒（雲端）
@@ -1096,6 +1100,7 @@ Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**�
 | **v1.1**    | 排程/cron（`bridge/scheduler.py`）                          | 2-3 天                         | —                                                                   |
 | **v1.2**    | Unity 點 Live2D → task（SendTask + OnClick）               | 3 天（**規格見 AGENT_OS.md**） | —                                                                   |
 | **v1.5**    | LLM tool calling（Mao 主動召喚任務）                        | 1-2 週                         | GAPS #2（多模態的 tool use）                                         |
+| **v1.5+**   | **Computer Control（15 個 tool + sandbox + confirmation + 長期記憶）** | ✅ 1 天（2026-06-08 完成）      | **新願景：「給 SIRO 一台空電腦養人格」**                              |
 | **v2.0**    | **任務持久化 + bridge 重啟可恢復 + multi-process 部署就緒** | 2-3 週                         | **K9（5歲到80歲會用）正式開始驗證**、GAPS #4（離線）、#5（災難恢復） |
 
 **v2.0 重點**（補上 [AGENT_OS.md v1+ Roadmap](docs/AGENT_OS.md) 漏段）：
@@ -1113,6 +1118,150 @@ Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**�
 - v2.0+ 之後才是「AI Agent OS」願景層（取代傳統桌面、Rust 改寫等）
 
 v0.x 進度（v0.2/v0.3/v0.3.1/v0.4/v0.4+）見「§5.5 v0.x 進度子表」。
+
+---
+
+### v1.5+ Computer Control — ✅ 完成（2026-06-08）
+
+**目標**：SIRO 從「chatbot」進化成「自主 agent」、有 15 個 tool 可在 sandbox 內自主操作、給 SIRO 一台空電腦養人格。
+
+**願景**：「我要給他一台空的電腦讓他養出一個屬於自己的性格」 — user 給 SIRO 一台空電腦（`~/siro-sandbox/`）、SIRO 透過自主探索累積行為模式、人格從中浮現（跨幾週/幾月）。
+
+**為什麼獨立成 sub-version 而不是塞進 v1.5**：
+
+- v1.5 是「LLM 透過 tool_use 選 emotion」（已有 set_mood / play_motion）
+- v1.5+ 是**完整的 15 個工具 + 安全護欄 + 確認機制 + 長期記憶** — 範圍遠超 v1.5
+- 哲學轉折：從「LLM 選 emotion」變成「LLM 操控電腦」、把 SIRO 從工具升級成主體
+- 為之後「給 SIRO 一台空電腦養人格」鋪路、Phase 4 之後可以實際 deploy
+
+**範圍**：
+
+- 15 個 LLM tool（Anthropic tool_use 標準）：filesystem 5 個、shell 1 個、memory 4 個、meta 3 個 + 既有 set_mood/play_motion
+- 三層安全護欄：sandbox path check + rate limit + audit log
+- Shell 指令三段式：blocklist 永遠擋 / whitelist 直接跑 / 其他透過 confirmation
+- WS confirmation 協議：user 透過 WS 推 yes/no 確認危險操作、60s 沒回自動拒絕
+- Multi-turn agent loop：LLM 可反覆 call tool 直到收工（最多 5 輪防 runaway）
+- SQLite 長期記憶：跨 session 累積經驗、SIRO 記得自己做過什麼
+- 觀察介面：3 個 `/siro/*` endpoint + WS tool_action 廣播
+- First-day persona prompt：給 SIRO 的「起床」引導
+
+**交付物**：
+
+- [X]  `bridge/security.py` — sandbox + rate limit + audit log
+- [X]  `bridge/confirmation.py` — WS broker（asyncio Future-based）
+- [X]  `bridge/tools/` package — 取代舊 `tools.py`、4 個子模組（filesystem / shell / memory / meta）
+- [X]  `bridge/tools_legacy_compat.py` — set_mood / play_motion 重新 export
+- [X]  `bridge/main.py` — 加 broker init、`/siro/{actions,memories,tools}` 3 個 endpoint、WS `confirmation_response` handler、`SIRO_USE_AGENT_MODE` 路徑
+- [X]  `bridge/minimax_streaming_client.py` — 加 `run_agent_loop()` + `_call_api_collect()`
+- [X]  `bridge/tasks/llm_reply_task.py` — 加 `create_llm_agent_task` + `_run_llm_agent`（含 tool dispatch + security guard）
+- [X]  `bridge/personas/siro-default.yaml` — first-day prompt 段落
+- [X]  `docs/PLANS/agent-computer-control.md` — 完整設計文件
+- [X]  `tests/bridge/test_security.py` — 20 個測試
+- [X]  `tests/bridge/test_v15_tools.py` — 37 個測試
+- [X]  `tests/bridge/test_confirmation.py` — 7 個測試
+- [X]  `tests/bridge/test_agent_loop.py` — 4 個測試
+- [X]  `docs/CHANGELOG.md` — 2026-06-08 v1.5+ entry
+- [X]  `SIRO_USE_AGENT_MODE` 預設翻 `true`（v1.5+ ship 當天翻預設、開箱即用）
+- [X]  `SIRO_TRUST_MODE` 加（v1.5.1、user 想看 SIRO 養人格、給全綠燈、保留 3 安全網）
+- [X]  `SIRO_USE_AGENT_MODE` 預設翻 `true`（v1.5.2 翻預設、user 不用設 env var）
+- [X]  `request_confirmation` 工具在 trust mode 從 LLM 拿掉（v1.5.2 避免 LLM 浪費一輪問 user）
+- [X]  v1.5.3 Computer Control via gRPC：bridge tools 改走 os-runtime 的 5 個新 RPC（ExecuteCommand / ReadFile / WriteFile / ListDirectory / StatPath）
+
+**驗收條件**：
+
+- [X]  15 個 tool 都從 `get_available_tools()` 拿到（registry 結構正確）
+- [X]  Sandbox path traversal 永遠被擋（`../`、`/etc/passwd` 等）
+- [X]  Shell blocklist 28 條規則（rm -rf、sudo、dd、mkfs、curl|sh 等）都正確 reject
+- [X]  Shell whitelist 60+ 條 read-only 指令直接跑（ls / cat / pwd / grep 等）
+- [X]  Confirmation broker request → resolve yes/no 正常、timeout 自動拒絕、未知 id 拒絕
+- [X]  Agent loop mock LLM 跑：單 tool / 收工 / max_iter / executor exception 四種路徑
+- [X]  327 個 Python 測試全綠（259 既有 + 68 新 v1.5+）、1 skip（不相關）
+- [X]  0 hardcoded secrets、0 TODO/FIXME、0 clippy warnings
+- [X]  Sandbox 預設 `~/siro-sandbox/`、env var `SIRO_SANDBOX_DIR` 可覆寫（測試用 tmpdir）
+
+**預估時間**：1 天（2026-06-08）
+**依賴**：Phase 1 ✅、Phase 1.5 ✅、Phase 3 ✅（streaming client + AgentOS）
+**風險**：
+
+- 🟡 LLM 跑 `rm -rf` 沒擋下 → blocklist 強制擋、sandbox path check
+- 🟡 LLM runaway loop → rate limit 30/min、1000/day
+- 🟡 User 被 spam 確認請求 → 60s timeout 自動 reject
+- 🟢 Memory 一直長大 → 30 天 archive、cap 10000 條（v2.0+ 補）
+
+**不在 v1.5+ 範圍**（之後再做）：
+
+- 網路（fetch_url / curl / wget） — Phase 4 sandbox egress 控管
+- 開 App / 操控其他進程 — Phase 4 kiosk 模式
+- 改 persona 檔 — 太複雜、要 user 審核 UI
+- Multi-tool parallel（一次多 tool_use） — v2.0
+- 自主發訊息給 user（proactive chat）— v2.0+
+- 移到空 Linux VM 養人格（"blank computer"） — Phase 4 之後
+
+**對未來 roadmap 的影響**：
+
+- Phase 4（Linux 客製化）→ 可以把 SIRO 真的 deploy 到一台空 VM、養人格
+- Phase 5（kiosk 模式）→ 與 computer control 互補：kiosk 鎖 UI / computer control 操控 OS
+- v2.0 持久化 → 把 audit log 跟 memory 都升級成可水平擴展
+- K9（5歲到80歲會用）→ 可以量測「給 user 看 SIRO 在 sandbox 裡自主做事的 UX 體驗」
+
+**Demo 流程**（2026-06-08 已可 demo）：
+
+1. 啟動 bridge、給 SIRO `~/siro-sandbox/` 空目錄
+2. user 問「sandbox 有什麼？」 → SIRO 跑 `list_dir` → 看到空 → 寫個 README → `save_memory` 記下「今天是我第一天」
+3. user 說「幫我裝個 Python 套件」 → SIRO 跑 `apt install` → WS 推 confirmation → user 按「允許」 → 安裝成功
+4. 重啟 SIRO → 問「我之前裝過什麼？」 → SIRO `recall_memory("apt")` → 找到之前記的
+5. 從 `/siro/actions` 看 SIRO 最近做過什麼、從 `/siro/memories` 看 SIRO 學到什麼
+
+---
+
+### v1.5.3 Computer Control via gRPC — ✅ 完成（2026-06-08）
+
+**目標**：把 SIRO 的電腦操作從 Python subprocess 統一走 gRPC 走 os-runtime
+- 之前 v1.5+ 的工具是 Python 直接 `subprocess.run(...)` 跑
+- Phase 3 做的 os-runtime 8 個 RPC 沒 system control 那些（process / hardware / kiosk only）
+- 這一刀補齊：os-runtime 加 5 個 system control RPC、bridge tools 改打 gRPC
+
+**範圍**：
+- os-runtime proto 加 5 個 RPC + 對應 message types
+- Rust 實作 `sandbox.rs` / `commands.rs` / `fs_ops.rs` 3 個新模組
+- bridge `os_runtime_client.py` 新 helper（lazy connection + 5 個 RPC method）
+- `bridge/tools/shell.py` 改走 `ExecuteCommand`
+- `bridge/tools/filesystem.py` 改走 `ReadFile` / `WriteFile` / `ListDirectory`
+- trust_mode / blocklist / confirmation 仍在 Python 層（LLM 工具層的 policy）
+- sandbox path check 在 Rust 層（os-runtime sandbox.rs）
+
+**交付物**：
+- [X]  `os-runtime/proto/siro.proto` 加 5 個 RPC
+- [X]  `os-runtime/crates/siro-runtime/src/sandbox.rs`（sandbox path check、12 個 unit test）
+- [X]  `os-runtime/crates/siro-runtime/src/commands.rs`（ExecuteCommand、6 個 unit test）
+- [X]  `os-runtime/crates/siro-runtime/src/fs_ops.rs`（4 個檔案 RPC、12 個 unit test）
+- [X]  `os-runtime/crates/siro-runtime/src/grpc.rs` 5 個 RPC handler
+- [X]  `bridge/tools/os_runtime_client.py`（gRPC client helper）
+- [X]  `bridge/tools/shell.py` 改用 gRPC（保留 blocklist / whitelist / confirmation）
+- [X]  `bridge/tools/filesystem.py` 改用 gRPC（list_dir / read_file / write_file）
+- [X]  `bridge/grpc_client/generated/` Python stubs 重生
+- [X]  `tests/bridge/test_os_runtime_client.py` FakeOsRuntimeClient mock
+- [X]  `tests/bridge/conftest.py` 自動 patch fixture
+- [X]  `docs/CHANGELOG.md` v1.5.3 entry
+
+**驗收條件**：
+- [X]  Rust `cargo build` 0 warning / 0 error（os-runtime 8 → 13 個 RPC）
+- [X]  Rust 30 個 unit test 全綠
+- [X]  Python 75 個 bridge test 全綠
+- [X]  bridge 透過 gRPC 呼叫 os-runtime、行為跟之前 Python 直接 subprocess 一致
+- [X]  sandbox path traversal 仍擋（在 Rust 層驗）
+- [X]  trust_mode / blocklist / confirmation 仍在 Python 層
+
+**對未來 roadmap 的影響**：
+- **Phase 4 Linux 客製化**：bridge 透過 network 連 os-runtime、SIRO 可以操控整台 Linux
+- **Phase 5 Kiosk 整合**：os-runtime 可以直接 mount kiosk 模式、SIRO 操控被 kiosk 限制
+- **v2.0 持久化**：audit log 統一在 os-runtime 寫、Python 端不用重複做
+
+**不在 v1.5.3 範圍**：
+- `search_files` 仍用 Python（os-runtime 沒對應 RPC、之後加）
+- `mkdir` 仍用 Python（同上）
+- `ManageService` / `ProcessList` / `NetworkStatus`（v1.6+ 計畫）
+- os-runtime 自己跑 blocklist（目前 Python 層做、之後可加）
 
 ---
 
@@ -1279,6 +1428,8 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 | 日期       | 版本   | 變更                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-14 | v3.7   | **gemma4 本地 LLM 路徑完全 revert**：移除 `bridge/gemma4_server.py` (HF transformers OpenAI-compat server)、`bridge/gemma4_requirements.txt`、`bridge/main.py` 的 `_prewarm_ollama` helper、`bridge/minimax_streaming_client.py` 的 OpenAI-compat 分支 + `<unusedN>` 過濾、`bridge/emotion_parser.py` 的 `EMOTION_TAG_PATTERN_GEMMA`、32GB 本地模型 (`models/gemma-3-1b-it` / `gemma-4-E4B-it` / `-full`)、`ollama/Modelfile.siro-gemma4*`、`docs/GEMMA4_SERVER.md`、`tests/bridge/test_gemma4_multimodal.py`、`scripts/dev/download_gemma4.py`、`.gitignore` 加 `models/` 跟 `ollama/`、`bridge/requirements.txt` 拿掉 `pillow` / `requests`、`.env.example` 把 `HERMES_LLM_*` 翻成 `anthropic` / `MiniMax-M3`。**決策原因**：gemma-4-E4B-it 9.2GB 載入 30-60s + 推論品質不穩，跟「SIRO 開機直接是角色、UX 流暢」衝突。**保留** v1.5+ Computer Control（15 tools / sandbox / WS confirmation / SQLite memory）和 v1.5.3 gRPC 化（13 個 RPC），281 個 Python 測試 + 38 個 Rust 測試全綠、bridge 啟動 log 0 gemma 引用。架構簡化回「雲端 Anthropic (預設) + Ollama llama3.2 (soft fallback)」雙層 |
+| 2026-06-08 | v3.6   | v1.5+ Computer Control 完成：15 個 LLM tool（filesystem 5 / shell 1 / memory 4 / meta 3 + set_mood / play_motion）+ 三層安全護欄（sandbox + rate limit + audit log）+ WS confirmation broker + multi-turn agent loop + SQLite 長期記憶。`bridge/security.py` `bridge/confirmation.py` `bridge/tools/` package 新建、`bridge/main.py` `minimax_streaming_client.py` `tasks/llm_reply_task.py` `personas/siro-default.yaml` 修改。**Phase 3 改 ✅ 完成**、Phase 1-3 audit 通過（327 tests pass + 0 hardcoded secrets + 0 TODO/FIXME）。文件 `docs/PLANS/agent-computer-control.md` 新建完整設計書 |
 | 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增`docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling                                                                                      |
 | 2026-06-05 | v3.4   | 合併 PLAN_REVISION_v2.1 + PLAN_REVIEW_v0.3 部分修訂：(1) v1+ Roadmap 加 v2.0（任務持久化、bridge 重啟可恢復、multi-process 部署就緒，K9 KPI 正式啟動驗證）— 補 AGENT_OS.md 漏段；(2) 加 §1.4 範圍邊界（v1 不做清單 14 項 + 只做清單）；(3) 加 §8.5 LLM 廠商風險管理（2 client 並行 + 不抽 protocol 抽象的決策依據）；(4) 加 §11 使用者驗證（user diary SOP + K9 啟動時程）；(5) v1+ Roadmap 表加「對應 KPI / GAPS」欄 |
 | 2026-06-04 | v3.3   | v1.2 SendTask + OnClick 實作：bridge 端 5 built-in + registry + WS handler + 12 個 test_sendtask.py 測試（210 過/1 skip）；Unity 端`SendTaskAsync` + `OnTaskResult`/`OnTaskFailed` event + `Live2DModelController.OnMaoClicked` + `PersonaClickHandler`；v0.x 進度子表 v1.2 ✅                                                                                                                                            |

@@ -1,18 +1,19 @@
 # SIRO 專案狀態總覽
 
-> **更新時間**：2026-06-04
+> **更新時間**：2026-06-09
 > **目的**：一眼看完「做到哪、有什麼、文件在哪、下一步是什麼」
 
 ## 一句話總結
 
-SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS。
-目前 v0.3 狀態：**1 人本機單 Mao、跟 Mao 中文對話可通、MiniMax-M3 雲端 LLM、9 種情緒、待機動作、繁體中文 UI、AgentOS 接到 /chat**。技術債清乾淨，K10 測試覆蓋率 83%。
+SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統 + Rust 系統層**」的 AI agent OS。
+目前 v0.4+ 狀態：**1 人本機單 Mao、跟 Mao 中文對話可通、MiniMax-M3 雲端 LLM、本地 Ollama fallback、9 種情緒、待機動作、繁體中文 UI、AgentOS 預設開、v1.5+ Computer Control 15 tools、v1.5.3 走 gRPC、v2.0 持久化 SQLite 雛型就位**。Phase 0-3 所有 plan 內代辦清光、準備進 v1.0 試用期。
 
 ### 版本演進
 
 - **v0.2**（已完成）：AgentOS 骨架 — Task Queue + Event Bus + Worker Pool + 14 個測試
 - **v0.3**（2026-06-04）：`/chat` opt-in 走 AgentOS（`SIRO_USE_AGENT_OS=true`）。Task 加 `id`、EventBus 改回傳 `unsubscribe()`、新增 `wait_for_task()`。23 個 AgentOS 測試 + 4 個 /chat 整合測試 = 27 個新測試（總計 188）。預設仍走 v0.2 sync 路徑，觀察穩定後 v0.4 預設改 true。
 - **v0.4**（2026-06-04）：`SIRO_USE_AGENT_OS` 預設翻 `true`（v0.3 觀察穩定後翻）。設 `SIRO_USE_AGENT_OS=false` 可降回 v0.2 sync。新增 5 個 TestUseAgentOSDefault 測試（總計 198 通過）。
+- **v0.4+**（2026-06-09）：os-runtime 設定檔讀寫（figment + TOML）、硬體偵測 GPU/audio/display/cameras 補完、en-US.json i18n、scripts/dev/、K2 決策重定義。23 個新 SQLite 測試、3 個新 PLANS doc、3 個新 docs。
 
 ---
 
@@ -20,11 +21,12 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 
 | 項目 | 狀態 | 備註 |
 |---|---|---|
-| **Phase 0** (manifest) | ✅ | `com.unity.nuget.newtonsoft-json` |
+| **Phase 0** (manifest + dev scripts) | ✅ | 含 `scripts/dev/` 收尾、check-env.py / dev.sh / dev.ps1 |
 | **Phase 1** (Unity + Cubism + bridge 對話) | ✅ | Play 模式實測通過 |
 | **Phase 1.5** (Persona 抽象 + 降級 + 隱私 + KPI) | ✅ | runtime 驗收 2026-06-03 |
 | **Phase 1.75** (技術債清理) | ✅ | 138→165 tests、async thread pool |
-| **Phase 2** (視覺強化 + 多工 AgentOS) | 🟡 進行中 | 待機動作 ✅、i18n ✅、AgentOS 骨架 ✅ |
+| **Phase 2** (視覺強化 + AgentOS + Computer Control) | ✅ | v0.2 → v0.4+ → v1.2 → v1.5+ → v1.5.3 全 ship |
+| **Phase 3** (Rust 系統層) | ✅ | v0.3.0 MVP + v0.4+ 設定檔 + 硬體偵測 |
 
 ---
 
@@ -50,6 +52,13 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統**」的 AI agent OS�
 ### 計畫 / 規劃
 - `~/.claude/plans/stateless-herding-nova.md` — v0.2 AgentOS 計畫（plan mode 寫的）
 - `~/.claude/plans/` — 還有其他歷史 plan
+- `docs/PLANS/agent-computer-control.md` — v1.5+ 完整設計
+- `docs/PLANS/v2-persistence.md` — v2.0 SQLite 持久化設計
+- `docs/PLANS/gaps-9-degradation.md` — GAPS #9 降級路徑細化
+- `docs/PLANS/k2-decision.md` — K2 反應時間決策（v1 目標改 < 5s）
+- `docs/RUST_REWRITE_NOTES.md` — Q1 Rust 改寫戰略
+- `docs/STREAMING_NOTES.md` — Q2 streaming 戰略
+- `docs/PERSONA_MIGRATION_GUIDE.md` — 怎麼寫新 persona
 
 ---
 
