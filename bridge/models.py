@@ -139,13 +139,33 @@ class TTSRequest(BaseModel):
     language: str = Field("zh-TW", description="BCP-47 語言標籤")
     provider: str = Field(
         "edge-tts",
-        description="TTS provider: edge-tts | piper | gpt-sovits",
+        description="TTS provider: edge-tts | piper | gpt-sovits | f5-tts",
     )
     speed: float = Field(1.0, ge=0.5, le=2.0, description="語速倍率 0.5-2.0")
     pitch: float = Field(0.0, ge=-10.0, le=10.0, description="音調 ±10 semitones")
     format: str = Field("mp3", description="音檔格式: mp3 | opus | wav")
     # GPT-SoVITS 專用(可選)
     refer_wav_path: Optional[str] = Field(None, description="GPT-SoVITS 參考音檔路徑")
+    # F5-TTS 專用(可選,Phase 1.5 polish 2.0)
+    ref_audio: Optional[str] = Field(
+        None,
+        description="F5-TTS ref_audio 6-30 秒 wav 路徑(留空會從 persona 拿)",
+    )
+    ref_text: Optional[str] = Field(
+        None,
+        description="F5-TTS ref_audio 對應文字(留空會從 persona 拿)",
+    )
+    # F5-TTS 推論參數(可選)
+    nfe_step: Optional[int] = Field(
+        None, ge=8, le=128, description="F5-TTS NFE 步數 8-128,預設 32"
+    )
+    cfg_strength: Optional[float] = Field(
+        None, ge=1.0, le=5.0, description="F5-TTS classifier-free guidance 1.0-5.0,預設 2.0"
+    )
+    # Persona 切換(可選,Phase 1.5.1b 加)
+    persona_id: Optional[str] = Field(
+        None, description="Persona ID(若提供,會自動從 persona 載入 ref_audio / ref_text / voice 設定)"
+    )
 
 
 class TTSResponse(BaseModel):

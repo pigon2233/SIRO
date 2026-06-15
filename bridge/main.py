@@ -997,10 +997,48 @@ async def synthesize_tts(req: TTSRequest) -> TTSResponse:
     """文字 → 音檔(給 Unity 端主動呼叫)
 
     回 base64 編碼的音檔 + 用了哪個 provider + chunk 數。
+
+    Phase 1.5.1b 修:支援 F5-TTS — 自動從 persona 載入 ref_audio / ref_text,
+    或直接從 req 帶。
     """
     from .tts import TTSConfig
     from .tts.voices import get_voice_for_persona
     try:
+        # 若 req 帶 persona_id,自動載入 persona 設定(ref_audio / ref_text / voice 預設)
+        extra: dict = {}
+        persona_id = req.persona_id or "siro-default"
+        try:
+            persona = load_persona(persona_id)
+            voice_cfg = persona.get("voice", {}) if persona else {}
+            # req 沒帶 → 從 persona 拿
+            if not req.ref_audio and voice_cfg.get("ref_audio"):
+                extra["ref_audio"] = voice_cfg["ref_audio"]
+            elif req.ref_audio:
+                extra["ref_audio"] = req.ref_audio
+            if not req.ref_text and voice_cfg.get("ref_text"):
+                extra["ref_text"] = voice_cfg["ref_text"]
+            elif req.ref_text:
+                extra["ref_text"] = req.ref_text
+            # nfe_step / cfg_strength(從 persona 拿)
+            if req.nfe_step is None and voice_cfg.get("nfe_step"):
+                extra["nfe_step"] = voice_cfg["nfe_step"]
+            elif req.nfe_step is not None:
+                extra["nfe_step"] = req.nfe_step
+            if req.cfg_strength is None and voice_cfg.get("cfg_strength"):
+                extra["cfg_strength"] = voice_cfg["cfg_strength"]
+            elif req.cfg_strength is not None:
+                extra["cfg_strength"] = req.cfg_strength
+        except Exception as e:
+            logger.warning(f"[tts] load persona {persona_id} failed: {e}, 用 req 帶的欄位")
+            if req.ref_audio:
+                extra["ref_audio"] = req.ref_audio
+            if req.ref_text:
+                extra["ref_text"] = req.ref_text
+            if req.nfe_step is not None:
+                extra["nfe_step"] = req.nfe_step
+            if req.cfg_strength is not None:
+                extra["cfg_strength"] = req.cfg_strength
+
         orchestrator = get_tts_orchestrator()
         config = TTSConfig(
             provider=req.provider,
@@ -1009,6 +1047,7 @@ async def synthesize_tts(req: TTSRequest) -> TTSResponse:
             speed=req.speed,
             pitch=req.pitch,
             format=req.format,
+            extra=extra,
         )
         # 累積 chunks
         chunks: list[bytes] = []

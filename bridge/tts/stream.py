@@ -109,10 +109,34 @@ class TTSOrchestrator:
 
         Raises:
             RuntimeError: 全部 provider 都失敗
+
+        Fallback 語意(Phase 1.5.1b 修):
+        - config.provider 明確指定(provider 存在於 providers 內)→ 只用那個,失敗 → 直接 raise
+          (user/persona 已經選了 F5-TTS,不該偷偷換 edge-tts)
+        - config.provider 是 "auto" / 沒指定 → 走 providers 順序,第一個 is_available 的
         """
+        # 判斷 config.provider 是不是「明確指定」特定 provider
+        explicit_provider_names = {p.name for p in self.providers}
+        if config.provider in explicit_provider_names:
+            # 明確指定 → 只用那個,不要 fallback
+            for p in self.providers:
+                if p.name == config.provider:
+                    logger.debug(
+                        f"[tts] synthesize via {p.name} (explicit): "
+                        f"voice={config.voice_id} text_len={len(text)}"
+                    )
+                    async for chunk in p.synthesize(text, config):
+                        yield chunk
+                    async with self._active_lock:
+                        self._active_provider = p
+                    return
+            # 不該到這(理論上 in explicit_provider_names 一定找得到)
+            raise RuntimeError(f"TTS provider {config.provider} 不存在於 providers list")
+
+        # 沒明確指定 → 走 fallback chain
         provider = await self.get_active_provider()
         logger.debug(
-            f"[tts] synthesize via {provider.name}: voice={config.voice_id} "
+            f"[tts] synthesize via {provider.name} (auto): voice={config.voice_id} "
             f"text_len={len(text)}"
         )
         async for chunk in provider.synthesize(text, config):

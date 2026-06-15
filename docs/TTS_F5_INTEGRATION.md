@@ -93,6 +93,44 @@ print("F5-TTS loaded OK")
 
 第一次會下載 model weights(~1.5GB)、下載完存在 `~/.cache/huggingface/`。
 
+### 7. Windows / hermes venv 安裝踩坑(2026-06-15 user 實測)
+
+`pip install` 套件版本衝突時照這套 — **別直接撞**、會壞 hermes-agent:
+
+| 套件 | 必須鎖定版本 | 原因 |
+|---|---|---|
+| `torch` | `==2.5.1+cu121` | hermes venv 內 `torchvision 0.27.0` 要 `torch==2.12.0`、衝突;新 transformers 也要 torch 2.6+。**2.5.1 是 sweet spot** |
+| `torchaudio` | `==2.5.1+cu121` | 對應 torch 2.5.1 |
+| `torchvision` | `==0.20.1+cu121` | 對應 torch 2.5.1。**不裝會 fail**:`transformers` import 時需要 `torchvision.io` |
+| `transformers` | `>=4.45,<4.50` | 4.50+ 需要 `torch.float8_e8m0fnu`(PyTorch 2.6+ 才有) |
+| `tokenizers` | `>=0.20,<0.22` | 跟 transformers 4.45-4.50 配對 |
+| `rich` | `==14.3.3` | `hermes-agent 0.15.1` 嚴格匹配 14.3.3。**F5-TTS 裝完會把 rich 降到 13.9.4 → 記得升回去** |
+| `f5-tts` | `>=1.1.20` | latest stable |
+| `soundfile` / `vocos` / `jieba` / `pypinyin` | latest | F5-TTS 推論依賴 |
+
+**一行安裝指令(Windows / PowerShell)**:
+
+```powershell
+& "$env:USERPROFILE\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install --no-cache-dir torch==2.5.1+cu121 torchaudio==2.5.1+cu121 torchvision==0.20.1+cu121 "transformers>=4.45,<4.50" "tokenizers>=0.20,<0.22" rich==14.3.3 f5-tts soundfile vocos jieba pypinyin --index-url https://download.pytorch.org/whl/cu121
+```
+
+> **沒 NVIDIA GPU** → 拿掉 `--index-url` 那段,`torch==2.5.1` 跟 `torchvision==0.20.1`(沒 `+cu121` suffix)從 PyPI 裝
+
+**裝完 F5-TTS 後一定要補**:
+```powershell
+& "$env:USERPROFILE\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install rich==14.3.3
+```
+
+**如果中間撞到 dependency conflict 警告**(像 `torchvision 0.27.0 requires torch==2.12.0`):
+- **不要無視**。先確認 transformers 會不會因此 fail(`import transformers`)。
+- 如果 fail → 升 torchvision 對應 torch 版本(見上表)。
+
+**建議先備份 venv 套件清單**:
+```powershell
+& "$env:USERPROFILE\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe" -m pip freeze > "$env:USERPROFILE\venv_backup_$(Get-Date -Format 'yyyyMMdd').txt"
+```
+出事能 `pip install -r` 還原。
+
 ## 架構整合
 
 ```
