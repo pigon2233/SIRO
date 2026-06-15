@@ -72,6 +72,14 @@ $env:SIRO_RUNTIME_ENABLED = "true"
 $env:SIRO_USE_AGENT_MODE = "true"
 $env:SIRO_TRUST_MODE = "true"
 $python = "C:\Users\jason\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe"
+# hermes-agent CLI 跟 bridge 同一個 venv — 告訴 hermes_client 用哪個 binary
+$hermesBin = "C:\Users\jason\AppData\Local\hermes\hermes-agent\venv\Scripts\hermes.exe"
+if (Test-Path $hermesBin) {
+    $env:HERMES_BIN_PATH = $hermesBin
+    Write-Host "[start_bridge] HERMES_BIN_PATH=$hermesBin" -ForegroundColor DarkGray
+} else {
+    Write-Host "[start_bridge] [WARN] hermes.exe not found at $hermesBin, hermes will be unavailable" -ForegroundColor Yellow
+}
 
 $bridgeProc = Start-Process -FilePath $python `
     -ArgumentList "-m", "bridge.main" `
