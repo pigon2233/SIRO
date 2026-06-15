@@ -40,8 +40,8 @@ namespace Siro
         public bool autoSpeak = true;
         [Tooltip("Mute on start (用戶可隨時按按鈕取消)")]
         public bool muted = false;
-        [Tooltip("TTS API timeout (秒)")]
-        public int ttsTimeoutSec = 15;
+        [Tooltip("TTS API timeout (秒)。edge-tts 預設 15s 夠用；F5-TTS CPU 第一次 cold start 5-10s + 推論 10-20s/句,設 60s 比較保險;GPU 可設回 15s")]
+        public int ttsTimeoutSec = 60;
 
         [Header("Fallback Voice")]
         [Tooltip("如果沒拿到 persona voice config, 用這個預設")]
