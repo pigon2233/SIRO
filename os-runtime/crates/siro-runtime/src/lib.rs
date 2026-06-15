@@ -13,5 +13,7 @@ pub mod grpc;
 pub mod sandbox;
 pub mod commands;
 pub mod fs_ops;
+// v0.5 抽象層：跨平台路徑解析 (Windows 實作 + Linux/macOS stub)
+pub mod platform;
 
 pub use grpc::generated as proto;

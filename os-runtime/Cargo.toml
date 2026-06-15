@@ -45,6 +45,11 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 # v1.5.3：ExecuteCommand 用 shlex split cmd 字串（防止 shell injection）
 shlex = "1.3"
+# v0.5 抽象層：跨平台 user data / config / cache path 解析
+# Windows: %LOCALAPPDATA%\SIRO\
+# Linux:   $XDG_DATA_HOME/siro/ 等
+# macOS:   ~/Library/Application Support/SIRO/
+directories = "5"
 
 # 優化設定
 [profile.release]

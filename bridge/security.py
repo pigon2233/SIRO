@@ -45,8 +45,9 @@ class SecurityError(Exception):
 # Layer 1: Sandbox path check
 # ============================================================
 
-# Sandbox 預設路徑（用 env var 覆寫方便測試）
-DEFAULT_SANDBOX = Path.home() / "siro-sandbox"
+# Sandbox 預設路徑（用 env var 覆寫方便測試、走 platform 抽象層）
+from .platform.paths import siro_sandbox_dir
+DEFAULT_SANDBOX = siro_sandbox_dir(ensure=False)
 
 
 def get_sandbox_root() -> Path:
@@ -235,9 +236,10 @@ class AuditLog:
     """
 
     def __init__(self, log_path: Optional[Path] = None):
-        self.log_path = log_path or (
-            Path(__file__).parent / "logs" / "siro-actions.jsonl"
-        )
+        if log_path is None:
+            from .platform.paths import user_log_dir
+            log_path = user_log_dir() / "siro-actions.jsonl"
+        self.log_path = log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 

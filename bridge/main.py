@@ -65,8 +65,18 @@ from .prompts import (
     load_persona,
 )
 
-# 載入 .env
-load_dotenv()
+# 載入 .env（v0.5 抽象層：先試 CWD（dev mode），fallback 到 user_config_dir/.env）
+_cwd_env = Path.cwd() / ".env"
+if _cwd_env.exists():
+    load_dotenv(_cwd_env)
+else:
+    from .platform.paths import user_config_dir
+    _user_env = user_config_dir(ensure=False) / ".env"
+    if _user_env.exists():
+        load_dotenv(_user_env)
+    else:
+        # 兩個都沒有也不 raise — 跟原本 load_dotenv() 一樣容許沒 .env
+        load_dotenv()
 
 # 設定 logging
 LOG_LEVEL = os.environ.get("BRIDGE_LOG_LEVEL", "INFO").upper()

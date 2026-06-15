@@ -79,7 +79,10 @@ class FreeExplorationScheduler:
         self.state = state
         self.interval_sec = interval_sec
         self.max_iter_per_session = max_iter_per_session
-        self.log_path = log_path or (Path(__file__).parent / "logs" / "siro-explore.jsonl")
+        if log_path is None:
+            from .platform.paths import user_log_dir
+            log_path = user_log_dir() / "siro-explore.jsonl"
+        self.log_path = log_path
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._task: Optional[asyncio.Task] = None

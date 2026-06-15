@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -43,7 +44,19 @@ logger = logging.getLogger(__name__)
 # DB 路徑
 # ============================================================
 
-DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "siro-memory.db"
+# v0.5：DB 預設放 user_data_dir()（跨平台），但保留 dev mode fallback
+#       給「直接從 repo 跑」的情境（這時 env var 沒設、fallback 到 data/siro-memory.db）
+_DEFAULT_DEV_DB = Path(__file__).parent.parent / "data" / "siro-memory.db"
+_env_db = os.environ.get("SIRO_MEMORY_DB")
+if _env_db:
+    DEFAULT_DB_PATH = Path(_env_db)
+else:
+    try:
+        from ..platform.paths import user_data_dir
+        DEFAULT_DB_PATH = user_data_dir(ensure=False) / "siro-memory.db"
+    except Exception:
+        # dev mode fallback、避免 import 失敗炸整個 module
+        DEFAULT_DB_PATH = _DEFAULT_DEV_DB
 
 # Module-level lock（sqlite3 不是 thread-safe）
 _db_lock = threading.Lock()

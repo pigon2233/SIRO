@@ -34,6 +34,8 @@ tokio-stream = { workspace = true }
 shlex = { workspace = true }
 # v0.4+：設定檔讀寫（figment + TOML）
 figment = { workspace = true }
+# v0.5 抽象層：跨平台 user data / config / cache path 解析
+directories = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
