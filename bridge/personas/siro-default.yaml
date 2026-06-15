@@ -164,7 +164,8 @@ idle_interval_seconds: [15, 45]
 # 跨 provider voice_id 預設表見 bridge/tts/voices.py:DEFAULT_VOICES
 voice:
   provider: edge-tts         # edge-tts | piper | gpt-sovits
-  voice_id: zh-TW-HsiaoChenNeural   # 繁中女「曉曉」、edge-tts 預設
+  voice_id: zh-TW-HsiaoYuNeural   # 繁中女「曉雨」、溫柔台灣國語 (2026-06-15 user 偏好)
+  # voice_id: zh-TW-HsiaoChenNeural  # 繁中女「曉臻」、自然台灣國語(原預設)
   # voice_id: en-US-JennyNeural     # 切英文時改這個
   # voice_id: zh_TW-hsiaochen-medium  # Piper 預設(無網路)
   # voice_id: mao-clone             # GPT-SoVITS 動漫聲線(v1.0 polish)
