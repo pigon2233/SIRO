@@ -15,5 +15,18 @@
     "ui.confirm.allow": "允許",
     "ui.confirm.deny": "拒絕",
     "ui.confirm.timeout_msg": "{0}s 後自動拒絕",
-    "ui.confirm.queued": "（還有 {0} 個請求排隊中）"
+    "ui.confirm.queued": "（還有 {0} 個請求排隊中）",
+    "ui.tts.thinking": "（準備語音中...）",
+    "ui.tts.synthesizing": "（合成語音中...）",
+    "ui.tts.speaking": "Mao 在講話",
+    "ui.tts.mute": "靜音",
+    "ui.tts.unmute": "取消靜音",
+    "ui.tts.failed": "（語音合成失敗）",
+    "ui.voice.label": "聲線",
+    "ui.voice.changing": "（切換聲線中...）",
+    "ui.mic.press_to_talk": "按住說話",
+    "ui.mic.listening": "（聆聽中...）",
+    "ui.mic.release_to_send": "放開送出",
+    "ui.mic.no_permission": "請允許麥克風存取",
+    "ui.mic.speech_detected": "（偵測到語音...）"
 }
