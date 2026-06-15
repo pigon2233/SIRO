@@ -164,11 +164,22 @@ idle_interval_seconds: [15, 45]
 # 完整設計見 docs/TTS_INTEGRATION.md + docs/TTS_F5_INTEGRATION.md
 # 跨 provider voice_id 預設表見 bridge/tts/voices.py:DEFAULT_VOICES
 voice:
-  provider: f5-tts
-  voice_id: mao-clone
-  ref_audio: models/f5_tts/refs/siroMP3.wav
-  ref_text: |
-    格式沒有統一 哈哈哈 沒關係啦 就像我們的周表一樣 我們的格式也沒有跟大家統一過 我們極深空的格式完全沒有跟統一過 像我就習慣把數字就是 時間我都會打在前面 可是其他三個都會打在後面 我就想說 痾 好吧沒關係
+  provider: edge-tts         # 2026-06-16 暫時退回 edge-tts,F5-TTS 沒出聲 + bridge 一直斷,Phase 1.5 之後再啟用
+  voice_id: zh-TW-HsiaoYuNeural   # 繁中女「曉雨」、溫柔台灣國語 (2026-06-15 user 偏好)
+  # voice_id: zh-TW-HsiaoChenNeural  # 繁中女「曉臻」、自然台灣國語(原預設)
+  # voice_id: en-US-JennyNeural     # 切英文時改這個
+  # voice_id: zh_TW-hsiaochen-medium  # Piper 預設(無網路)
+  # voice_id: mao-clone             # GPT-SoVITS 動漫聲線(v1.0 polish 2)
+
+  # F5-TTS 設定範例(Phase 1.5、需 pip install f5-tts + 準備 ref_audio + GPU 才實用):
+  # provider: f5-tts
+  # voice_id: mao-clone             # 任意命名
+  # ref_audio: models/f5_tts/refs/siroMP3.wav   # 6-30 秒 wav、清晰
+  # ref_text: 你好,我是 Mao,接下來會用這個聲音跟你說話。  # ref_audio 對應文字
+  # F5-TTS 進階 tuning(可選):
+  # nfe_step: 32        # 16-64、越高越慢越穩
+  # cfg_strength: 2.0   # 1.0-3.0、越高越貼 ref 但可能失真
+
   language: zh-TW            # 跟 language: zh-TW 對齊
   gender: female             # female | male
   speed: 1.0                 # 0.5-2.0
