@@ -155,12 +155,26 @@ model:
 idle_motions: []   # Phase 2 補
 idle_interval_seconds: [15, 45]
 
-# ============ TTS 聲線 (Phase 2-3 用) ============
+# ============ TTS 聲線 (v1.0 Core Experience Phase 1) ============
+# Tier 1 (default): edge-tts 雲端、免費、100+ 聲線
+# Tier 2 (fallback): piper 本地 ONNX、無網路時用
+# Tier 3 (v1.0 polish): gpt-sovits 動漫聲線 clone(給 Mao 用動漫聲優音色)
+#
+# 完整設計見 docs/TTS_INTEGRATION.md
+# 跨 provider voice_id 預設表見 bridge/tts/voices.py:DEFAULT_VOICES
 voice:
-  provider: none   # Phase 2-3 改 piper / edge-tts
-  model: null
-  speed: 1.0
-  pitch: 0
+  provider: edge-tts         # edge-tts | piper | gpt-sovits
+  voice_id: zh-TW-HsiaoChenNeural   # 繁中女「曉曉」、edge-tts 預設
+  # voice_id: en-US-JennyNeural     # 切英文時改這個
+  # voice_id: zh_TW-hsiaochen-medium  # Piper 預設(無網路)
+  # voice_id: mao-clone             # GPT-SoVITS 動漫聲線(v1.0 polish)
+  language: zh-TW            # 跟 language: zh-TW 對齊
+  gender: female             # female | male
+  speed: 1.0                 # 0.5-2.0
+  pitch: 0                   # -10 ~ +10 semitones
+  # gpt-sovits 專用欄位(只 v1.0 polish 需要):
+  # refer_wav_path: models/gpt-sovits/mao/ref.wav
+  # prompt_text: "原始音檔對應的文字"
 
 # ============ 降級回應池 (Phase 1.5 用) ============
 # Hermes 死掉 / 網路斷時、bridge 直接吐這些

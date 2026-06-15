@@ -108,6 +108,8 @@ class PersonaDetail(PersonaSummary):
     idle_interval_seconds: list[int] = Field(default_factory=list)
     # v0.3+ 視覺設定檔（scale/position/anchor/brightness/opacity/mirror/z_order）
     visual: VisualSettings = Field(default_factory=VisualSettings)
+    # v1.0 Core Experience Phase 1：TTS 設定（給 Unity 端知道用哪個 voice）
+    voice: dict[str, Any] = Field(default_factory=dict)
 
 
 class PersonaListResponse(BaseModel):
@@ -120,3 +122,56 @@ class ErrorResponse(BaseModel):
     """錯誤回應"""
     error: str
     detail: Optional[str] = None
+
+
+# ============================================================
+# v1.0 Core Experience Phase 1: TTS schemas
+# 設計見 docs/TTS_INTEGRATION.md
+# ============================================================
+
+class TTSRequest(BaseModel):
+    """TTS 合成請求 (POST /tts/synthesize)"""
+    text: str = Field(..., min_length=1, max_length=5000, description="要唸的文字")
+    voice_id: str = Field(
+        "zh-TW-HsiaoChenNeural",
+        description="聲線 ID (跨 provider 命名,見 bridge/tts/voices.py:DEFAULT_VOICES)",
+    )
+    language: str = Field("zh-TW", description="BCP-47 語言標籤")
+    provider: str = Field(
+        "edge-tts",
+        description="TTS provider: edge-tts | piper | gpt-sovits",
+    )
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="語速倍率 0.5-2.0")
+    pitch: float = Field(0.0, ge=-10.0, le=10.0, description="音調 ±10 semitones")
+    format: str = Field("mp3", description="音檔格式: mp3 | opus | wav")
+    # GPT-SoVITS 專用(可選)
+    refer_wav_path: Optional[str] = Field(None, description="GPT-SoVITS 參考音檔路徑")
+
+
+class TTSResponse(BaseModel):
+    """TTS 合成回應"""
+    audio_base64: str = Field(..., description="音檔 base64 編碼(給 Unity 端 AudioClip 解碼)")
+    format: str = Field(..., description="音檔格式")
+    duration_ms: Optional[int] = Field(None, description="音檔長度 (ms,估算)")
+    provider: str = Field(..., description="實際使用的 TTS provider")
+    voice_id: str = Field(..., description="實際使用的 voice_id")
+    chunks: int = Field(1, description="串流 chunks 數(debug 用)")
+    text_len: int = Field(0, description="輸入文字長度(debug 用)")
+
+
+class TTSVoiceInfo(BaseModel):
+    """單一聲線資訊 (GET /tts/voices 回應的 element)"""
+    id: str
+    name: str
+    language: str
+    gender: str = "unknown"
+    provider: str = ""
+    preview_url: Optional[str] = None
+
+
+class TTSVoicesResponse(BaseModel):
+    """GET /tts/voices 回應"""
+    provider: str = Field("", description="查詢的 provider 名稱")
+    voices: list[TTSVoiceInfo] = Field(default_factory=list)
+    active_provider: Optional[str] = Field(None, description="目前自動選擇的 provider (給 Unity 端用)")
+    language_filter: Optional[str] = Field(None, description="查詢時的 language 過濾")

@@ -258,6 +258,53 @@ def get_persona_visual(name: str = "default") -> dict[str, Any]:
     return merged
 
 
+def get_persona_voice(name: str = "default") -> dict[str, Any]:
+    """
+    取得 persona 的 TTS 聲線設定（v1.0 Core Experience Phase 1）
+
+    給 Unity 端 /tts/synthesize / /tts/voices 路由用：
+    - 從 persona.voice 段載入
+    - 預設 edge-tts 繁中女「曉曉」(zh-TW-HsiaoChenNeural)
+    - 沒寫 YAML 也照跑,Unity 端不用判斷 None
+
+    Returns:
+        dict 形如 {
+            "provider": "edge-tts",
+            "voice_id": "zh-TW-HsiaoChenNeural",
+            "language": "zh-TW",
+            "gender": "female",
+            "speed": 1.0,
+            "pitch": 0.0,
+            "extra": {}  # GPT-SoVITS 的 refer_wav_path 等
+        }
+    """
+    persona = load_persona(name)
+    defaults = {
+        "provider": "edge-tts",
+        "voice_id": "zh-TW-HsiaoChenNeural",
+        "language": "zh-TW",
+        "gender": "female",
+        "speed": 1.0,
+        "pitch": 0.0,
+        "extra": {},
+    }
+    if persona is None:
+        return defaults
+    voice = persona.get("voice", {})
+    # language 從 persona 頂層拿(預設 zh-TW)
+    defaults["language"] = persona.get("language", defaults["language"])
+    # voice 段寫了什麼用什麼、沒寫用 default
+    for key in ("provider", "voice_id", "language", "gender", "speed", "pitch"):
+        if key in voice:
+            defaults[key] = voice[key]
+    # GPT-SoVITS 額外欄位
+    if "refer_wav_path" in voice:
+        defaults["extra"]["refer_wav_path"] = voice["refer_wav_path"]
+    if "prompt_text" in voice:
+        defaults["extra"]["prompt_text"] = voice["prompt_text"]
+    return defaults
+
+
 # ============ 向後相容 ============
 
 # 舊 code 用 PERSONALITIES dict 直接取 — Phase 2 後可移除

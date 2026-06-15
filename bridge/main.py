@@ -53,6 +53,10 @@ from .models import (
     PersonaDetail,
     PersonaListResponse,
     VisualSettings,
+    TTSRequest,
+    TTSResponse,
+    TTSVoiceInfo,
+    TTSVoicesResponse,
 )
 from .prompts import (
     get_personality,
@@ -61,6 +65,7 @@ from .prompts import (
     get_persona_model_meta,
     get_persona_quirks,
     get_persona_visual,
+    get_persona_voice,           # v1.0 Core Experience Phase 1
     list_personas,
     load_persona,
 )
@@ -926,6 +931,108 @@ async def siro_tools() -> dict:
 
 
 # ============================================================
+# v1.0 Core Experience Phase 1: TTS 路由
+# 設計見 docs/TTS_INTEGRATION.md
+# Unity 端在 LLM 回應後主動打 /tts/synthesize 拿音檔
+# Phase 1.5: 自動 trigger(LLM 出 sentence 立即合成)
+# ============================================================
+
+@app.get("/tts/voices", response_model=TTSVoicesResponse)
+async def list_tts_voices(
+    provider: str = "edge-tts",
+    language: str = "",
+) -> TTSVoicesResponse:
+    """列出可用聲線(給 Unity 端 dropdown 用)
+
+    Args:
+        provider: edge-tts / piper / gpt-sovits
+        language: 過濾語言(空字串 = 全部)
+    """
+    try:
+        from .tts import list_available_voices, get_tts_orchestrator
+        voices = await list_available_voices(provider=provider, language=language)
+        active = await get_tts_orchestrator().get_active_provider()
+        return TTSVoicesResponse(
+            provider=provider,
+            voices=[TTSVoiceInfo(
+                id=v.id, name=v.name, language=v.language,
+                gender=v.gender, provider=v.provider, preview_url=v.preview_url,
+            ) for v in voices],
+            active_provider=active.name,
+            language_filter=language or None,
+        )
+    except Exception as e:
+        # TTS 套件沒裝、或 edge-tts 連不上時,回空清單(不讓整個 bridge 掛掉)
+        logger.warning(f"[tts] list_voices failed: {e}")
+        return TTSVoicesResponse(
+            provider=provider,
+            voices=[],
+            active_provider=None,
+            language_filter=language or None,
+        )
+
+
+@app.get("/tts/persona/{persona_id}")
+async def get_persona_voice_config(persona_id: str) -> dict:
+    """拿 persona 預設的 TTS 設定(給 Unity 端知道用哪個 voice)"""
+    from .tts.voices import get_voice_for_persona
+    persona = load_persona(persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail=f"persona '{persona_id}' not found")
+    config = get_voice_for_persona(persona)
+    return {
+        "persona_id": persona_id,
+        "provider": config.provider,
+        "voice_id": config.voice_id,
+        "language": config.language,
+        "speed": config.speed,
+        "pitch": config.pitch,
+        "format": config.format,
+    }
+
+
+@app.post("/tts/synthesize", response_model=TTSResponse)
+async def synthesize_tts(req: TTSRequest) -> TTSResponse:
+    """文字 → 音檔(給 Unity 端主動呼叫)
+
+    回 base64 編碼的音檔 + 用了哪個 provider + chunk 數。
+    """
+    from .tts import TTSConfig
+    from .tts.voices import get_voice_for_persona
+    try:
+        orchestrator = get_tts_orchestrator()
+        config = TTSConfig(
+            provider=req.provider,
+            voice_id=req.voice_id,
+            language=req.language,
+            speed=req.speed,
+            pitch=req.pitch,
+            format=req.format,
+        )
+        # 累積 chunks
+        chunks: list[bytes] = []
+        chunk_count = 0
+        async for chunk in orchestrator.synthesize_stream(req.text, config):
+            chunks.append(chunk)
+            chunk_count += 1
+        if not chunks:
+            raise RuntimeError("TTS 沒產出任何音檔")
+        audio_bytes = b"".join(chunks)
+        import base64
+        return TTSResponse(
+            audio_base64=base64.b64encode(audio_bytes).decode("ascii"),
+            format=req.format,
+            provider=config.provider,
+            voice_id=config.voice_id,
+            chunks=chunk_count,
+            text_len=len(req.text),
+        )
+    except Exception as e:
+        logger.error(f"[tts] synthesize failed: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS 合成失敗: {e}")
+
+
+# ============================================================
 # v1.5+ Free Exploration mode（24/7 自主探索）
 # ============================================================
 
@@ -1038,6 +1145,7 @@ async def get_persona_detail(persona_id: str) -> PersonaDetail:
     quirks = get_persona_quirks(persona_id)
     expressions = get_persona_expressions(persona_id)
     visual_raw = get_persona_visual(persona_id)
+    voice_cfg = get_persona_voice(persona_id)  # v1.0 Core Experience Phase 1
 
     return PersonaDetail(
         id=persona.get("id", persona_id),
@@ -1051,6 +1159,7 @@ async def get_persona_detail(persona_id: str) -> PersonaDetail:
         expressions=expressions,
         idle_motions=persona.get("idle_motions", []),
         idle_interval_seconds=persona.get("idle_interval_seconds", [15, 45]),
+        voice=voice_cfg,
         visual=VisualSettings(**visual_raw),
     )
 

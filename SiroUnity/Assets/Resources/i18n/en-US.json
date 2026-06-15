@@ -15,5 +15,18 @@
     "ui.confirm.allow": "Allow",
     "ui.confirm.deny": "Deny",
     "ui.confirm.timeout_msg": "Auto-deny in {0}s",
-    "ui.confirm.queued": "({0} more requests queued)"
+    "ui.confirm.queued": "({0} more requests queued)",
+    "ui.tts.thinking": "(Preparing speech...)",
+    "ui.tts.synthesizing": "(Synthesizing speech...)",
+    "ui.tts.speaking": "Mao is speaking",
+    "ui.tts.mute": "Mute",
+    "ui.tts.unmute": "Unmute",
+    "ui.tts.failed": "(TTS failed)",
+    "ui.voice.label": "Voice",
+    "ui.voice.changing": "(Changing voice...)",
+    "ui.mic.press_to_talk": "Press to talk",
+    "ui.mic.listening": "(Listening...)",
+    "ui.mic.release_to_send": "Release to send",
+    "ui.mic.no_permission": "Please allow microphone access",
+    "ui.mic.speech_detected": "(Speech detected...)"
 }
