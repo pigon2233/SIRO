@@ -155,25 +155,36 @@ model:
 idle_motions: []   # Phase 2 補
 idle_interval_seconds: [15, 45]
 
-# ============ TTS 聲線 (v1.0 Core Experience Phase 1) ============
-# Tier 1 (default): edge-tts 雲端、免費、100+ 聲線
+# ============ TTS 聲線 (v1.0 Core Experience Phase 1 + 1.5) ============
+# Tier 1.5 (default if installed): F5-TTS 本地、零樣本聲線 clone、像真人在講話
+# Tier 1 (default if F5-TTS 沒裝): edge-tts 雲端、免費、100+ 聲線
 # Tier 2 (fallback): piper 本地 ONNX、無網路時用
-# Tier 3 (v1.0 polish): gpt-sovits 動漫聲線 clone(給 Mao 用動漫聲優音色)
+# Tier 3 (v1.0 polish 2): gpt-sovits 動漫聲線 clone(給 Mao 用動漫聲優音色)
 #
-# 完整設計見 docs/TTS_INTEGRATION.md
+# 完整設計見 docs/TTS_INTEGRATION.md + docs/TTS_F5_INTEGRATION.md
 # 跨 provider voice_id 預設表見 bridge/tts/voices.py:DEFAULT_VOICES
 voice:
-  provider: edge-tts         # edge-tts | piper | gpt-sovits
+  provider: edge-tts         # edge-tts | piper | f5-tts | gpt-sovits
   voice_id: zh-TW-HsiaoYuNeural   # 繁中女「曉雨」、溫柔台灣國語 (2026-06-15 user 偏好)
   # voice_id: zh-TW-HsiaoChenNeural  # 繁中女「曉臻」、自然台灣國語(原預設)
   # voice_id: en-US-JennyNeural     # 切英文時改這個
   # voice_id: zh_TW-hsiaochen-medium  # Piper 預設(無網路)
-  # voice_id: mao-clone             # GPT-SoVITS 動漫聲線(v1.0 polish)
+  # voice_id: mao-clone             # GPT-SoVITS 動漫聲線(v1.0 polish 2)
+
+  # F5-TTS 設定範例(Phase 1.5、需 pip install f5-tts + 準備 ref_audio):
+  # provider: f5-tts
+  # voice_id: mao-clone             # 任意命名
+  # ref_audio: models/f5_tts/refs/default_zh.wav   # 6-30 秒 wav、清晰
+  # ref_text: 你好,我是 Mao,接下來會用這個聲音跟你說話。  # ref_audio 對應文字
+  # F5-TTS 進階 tuning(可選):
+  # nfe_step: 32        # 16-64、越高越慢越穩
+  # cfg_strength: 2.0   # 1.0-3.0、越高越貼 ref 但可能失真
+
   language: zh-TW            # 跟 language: zh-TW 對齊
   gender: female             # female | male
   speed: 1.0                 # 0.5-2.0
   pitch: 0                   # -10 ~ +10 semitones
-  # gpt-sovits 專用欄位(只 v1.0 polish 需要):
+  # gpt-sovits 專用欄位(只 v1.0 polish 2 需要):
   # refer_wav_path: models/gpt-sovits/mao/ref.wav
   # prompt_text: "原始音檔對應的文字"
 

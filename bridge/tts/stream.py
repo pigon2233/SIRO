@@ -20,6 +20,7 @@ from typing import AsyncIterator
 
 from .base import TTSConfig, TTSProvider
 from .edge_tts import EdgeTTSProvider
+from .f5_tts import F5TTSProvider
 from .piper_tts import PiperTTSProvider
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,10 @@ class TTSOrchestrator:
 
     def __init__(self, providers: list[TTSProvider] | None = None) -> None:
         if providers is None:
-            # 預設: edge-tts (Tier 1) + Piper (Tier 2 fallback)
+            # 預設: F5-TTS (Tier 1.5 本地高品質) → edge-tts (Tier 1 雲端) → Piper (Tier 2 fallback)
+            # F5-TTS is_available() 自動判斷,沒裝就 fallback edge-tts
             self.providers = [
+                F5TTSProvider(),
                 EdgeTTSProvider(),
                 PiperTTSProvider(),
             ]

@@ -20,6 +20,7 @@ bridge/tts - TTS (Text-to-Speech) 抽象層 (Core Experience v1.0 Phase 1)
 """
 
 from .base import TTSProvider, TTSConfig, Voice
+from .f5_tts import F5TTSProvider  # Phase 1.5 本地高品質 TTS
 from .stream import TTSOrchestrator, get_tts_orchestrator
 from .voices import (
     get_voice_for_persona,
@@ -33,6 +34,7 @@ __all__ = [
     "Voice",
     "TTSOrchestrator",
     "get_tts_orchestrator",
+    "F5TTSProvider",
     "get_voice_for_persona",
     "list_available_voices",
     "invalidate_voice_cache",

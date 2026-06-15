@@ -36,6 +36,9 @@ DEFAULT_VOICES: dict[tuple[str, str, str], str] = {
     ("piper", "en-US", "male"): "en_US-ryan-low",
     # GPT-SoVITS (v1.0 polish)
     ("gpt-sovits", "zh-TW", "female"): "mao-clone",
+    # F5-TTS (Phase 1.5 本地高品質、zero-shot voice clone)
+    ("f5-tts", "zh-TW", "female"): "mao-clone",
+    ("f5-tts", "zh-TW", "male"): "user-clone",
 }
 
 

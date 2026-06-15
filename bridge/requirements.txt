@@ -40,3 +40,15 @@ platformdirs>=4.2,<5
 # v0.5 Windows Service 化：pywin32 (Windows only) + psutil (cross-platform)
 pywin32>=306; sys_platform == "win32"
 psutil>=5.9.0
+
+# Phase 1.5: F5-TTS 本地高品質 TTS (零樣本聲線 clone)
+# 沒裝也能跑,會 fallback edge-tts → Piper。詳細見 docs/TTS_F5_INTEGRATION.md
+# 安裝 PyTorch(必要、CPU or GPU 擇一):
+#   pip install torch torchaudio
+#   # 或 GPU: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+f5-tts>=2024.10.0
+soundfile>=0.12.1
+vocos>=0.1.0
+jieba>=0.42.1
+pypinyin>=0.51.0
+
