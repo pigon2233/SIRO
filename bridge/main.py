@@ -58,6 +58,7 @@ from .models import (
     TTSVoiceInfo,
     TTSVoicesResponse,
 )
+from .tts import get_tts_orchestrator  # v1.0 Core Experience Phase 1 — TTS orchestrator
 from .prompts import (
     get_personality,
     get_fallback_response,
