@@ -40,8 +40,8 @@ namespace Siro
         public bool autoSpeak = true;
         [Tooltip("Mute on start (用戶可隨時按按鈕取消)")]
         public bool muted = false;
-        [Tooltip("TTS API timeout (秒)。edge-tts 預設 15s 夠用；F5-TTS CPU 第一次 cold start 5-10s + 推論 10-20s/句,設 60s 比較保險;GPU 可設回 15s")]
-        public int ttsTimeoutSec = 60;
+        [Tooltip("TTS API timeout (秒)。edge-tts < 5s;F5-TTS 第一次 cold start 145s(RTX 3050 4GB)+ 後續推論 5-10s/句,設 180s 比較保險")]
+        public int ttsTimeoutSec = 180;
 
         [Header("Fallback Voice")]
         [Tooltip("如果沒拿到 persona voice config, 用這個預設")]
@@ -53,6 +53,12 @@ namespace Siro
         private string _activeVoiceId;
         private string _activeLanguage;
         private string _activeProvider;
+        // F5-TTS 專用(Phase 1.5.1d): 從 persona.voice 帶 ref_audio / ref_text
+        private string _activeRefAudio;
+        private string _activeRefText;
+        private int _activeNfeStep = 0;     // 0 = 用 persona 預設 / bridge 預設
+        private float _activeCfgStrength = 0f;
+        private string _activePersonaId = "siro-default";
 
         // 防重複 TTS 自己打的訊息
         private string _lastUserMessage = "";
@@ -166,15 +172,28 @@ namespace Siro
         private void HandlePersonaChanged(PersonaConfig config)
         {
             if (config == null) return;
-            // 從 persona 拿 voice 設定(透過 bridge 拉的 /personas/{id} response.voice)
-            // Phase 1 簡化版:直接讀 config 裡的 voice(若 PersonaConfig 支援)
-            // 目前 PersonaConfig 還沒有 voice 欄位(那是在 bridge 端)
-            // 所以 fallback:用預設 voice
-            // TODO Phase 1.5: 加 PersonaConfig.voice 欄位同步
-            _activeVoiceId = fallbackVoiceId;
-            _activeLanguage = config.language ?? fallbackLanguage;
-            _activeProvider = fallbackProvider;
-            Debug.Log($"[TTSPlayer] persona changed → voice={_activeVoiceId} lang={_activeLanguage}");
+            _activePersonaId = config.id ?? "siro-default";
+            // Phase 1.5.1d: 從 persona.voice 拿 TTS 設定,而不是 hard-code edge-tts
+            if (config.voice != null)
+            {
+                _activeProvider = string.IsNullOrEmpty(config.voice.provider) ? fallbackProvider : config.voice.provider;
+                _activeVoiceId = string.IsNullOrEmpty(config.voice.voice_id) ? fallbackVoiceId : config.voice.voice_id;
+                _activeLanguage = string.IsNullOrEmpty(config.voice.language) ? (config.language ?? fallbackLanguage) : config.voice.language;
+                _activeRefAudio = config.voice.ref_audio;
+                _activeRefText = config.voice.ref_text;
+                _activeNfeStep = config.voice.nfe_step;
+                _activeCfgStrength = config.voice.cfg_strength;
+                Debug.Log($"[TTSPlayer] persona changed → provider={_activeProvider} voice={_activeVoiceId} lang={_activeLanguage} ref_audio={_activeRefAudio ?? "(none)"}");
+            }
+            else
+            {
+                _activeVoiceId = fallbackVoiceId;
+                _activeLanguage = config.language ?? fallbackLanguage;
+                _activeProvider = fallbackProvider;
+                _activeRefAudio = null;
+                _activeRefText = null;
+                Debug.LogWarning($"[TTSPlayer] persona '{config.id}' 沒有 voice 設定,fallback edge-tts");
+            }
         }
 
         // ==================== Internal: API Call ====================
@@ -194,6 +213,16 @@ namespace Siro
             string url = $"{httpBase}/tts/synthesize";
             // 用 Newtonsoft.Json 序列化 text(Unity 預設的 .NET API 不含 System.Text.Json)
             string textJson = JsonConvert.SerializeObject(text);
+            // Phase 1.5.1d: 帶 ref_audio / ref_text / nfe_step / cfg_strength / persona_id
+            // escape double quote 避免 yaml 路徑內有 " 炸 JSON
+            string refAudioEscaped = _activeRefAudio == null ? "" : _activeRefAudio.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            string refTextEscaped = _activeRefText == null ? "" : _activeRefText.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+            string extraFields = "";
+            if (!string.IsNullOrEmpty(_activeRefAudio)) extraFields += $", \"ref_audio\": \"{refAudioEscaped}\"";
+            if (!string.IsNullOrEmpty(_activeRefText)) extraFields += $", \"ref_text\": \"{refTextEscaped}\"";
+            if (_activeNfeStep > 0) extraFields += $", \"nfe_step\": {_activeNfeStep}";
+            if (_activeCfgStrength > 0f) extraFields += $", \"cfg_strength\": {_activeCfgStrength.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            extraFields += $", \"persona_id\": \"{_activePersonaId}\"";
             string json = $@"{{
                 ""text"": {textJson},
                 ""voice_id"": ""{_activeVoiceId}"",
@@ -201,7 +230,7 @@ namespace Siro
                 ""provider"": ""{_activeProvider}"",
                 ""speed"": 1.0,
                 ""pitch"": 0.0,
-                ""format"": ""mp3""
+                ""format"": ""wav""{extraFields}
             }}";
 
             using (UnityWebRequest req = new UnityWebRequest(url, "POST"))
@@ -224,17 +253,18 @@ namespace Siro
                 string responseJson = req.downloadHandler.text;
                 JObject respObj = JObject.Parse(responseJson);
                 string audioBase64 = (string)respObj["audio_base64"];
+                string audioFormat = (string)respObj["format"] ?? "mp3";
                 if (string.IsNullOrEmpty(audioBase64))
                 {
                     Debug.LogWarning("[TTSPlayer] 回應沒 audio_base64");
                     yield break;
                 }
 
-                // Decode base64 → mp3 bytes
-                byte[] mp3Bytes;
+                // Decode base64 → audio bytes
+                byte[] audioBytes;
                 try
                 {
-                    mp3Bytes = Convert.FromBase64String(audioBase64);
+                    audioBytes = Convert.FromBase64String(audioBase64);
                 }
                 catch (Exception e)
                 {
@@ -242,27 +272,42 @@ namespace Siro
                     yield break;
                 }
 
-                // mp3 → AudioClip (用 UnityWebRequestMultimedia 載 mp3)
-                yield return LoadMp3AndPlay(mp3Bytes);
+                // 寫暫存檔 + Unity 載 (Phase 1.5.1d 支援 wav | mp3)
+                yield return LoadAudioAndPlay(audioBytes, audioFormat);
             }
         }
 
-        private IEnumerator LoadMp3AndPlay(byte[] mp3Bytes)
+        private IEnumerator LoadAudioAndPlay(byte[] audioBytes, string format)
         {
-            // Unity 的 AudioClip 不直接支援 mp3、要走 UnityWebRequestMultimedia
-            // 寫到暫存檔、再載入
-            string tempPath = System.IO.Path.Combine(Application.temporaryCachePath, $"siro_tts_{DateTime.UtcNow.Ticks}.mp3");
+            // Phase 1.5.1d: 支援 wav | mp3 | opus(依 bridge response 的 format 決定)
+            // wav 是 F5-TTS 預設;mp3 是 edge-tts 預設
+            string ext = format.ToLower() switch
+            {
+                "wav" => "wav",
+                "mp3" => "mp3",
+                "opus" => "ogg",
+                _ => "wav",
+            };
+            AudioType audioType = format.ToLower() switch
+            {
+                "wav" => AudioType.WAV,
+                "mp3" => AudioType.MPEG,
+                "opus" => AudioType.OGGVORBIS,
+                _ => AudioType.WAV,
+            };
+            string tempPath = System.IO.Path.Combine(
+                Application.temporaryCachePath, $"siro_tts_{DateTime.UtcNow.Ticks}.{ext}");
             try
             {
-                System.IO.File.WriteAllBytes(tempPath, mp3Bytes);
+                System.IO.File.WriteAllBytes(tempPath, audioBytes);
             }
             catch (Exception e)
             {
-                Debug.LogError($"[TTSPlayer] 寫暫存 mp3 失敗: {e.Message}");
+                Debug.LogError($"[TTSPlayer] 寫暫存音檔失敗: {e.Message}");
                 yield break;
             }
 
-            using (UnityWebRequest req = UnityWebRequestMultimedia.GetAudioClip(tempPath, AudioType.MPEG))
+            using (UnityWebRequest req = UnityWebRequestMultimedia.GetAudioClip(tempPath, audioType))
             {
                 req.timeout = ttsTimeoutSec;
                 yield return req.SendWebRequest();
@@ -270,7 +315,7 @@ namespace Siro
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
-                    Debug.LogWarning($"[TTSPlayer] mp3 decode 失敗: {req.error}");
+                    Debug.LogWarning($"[TTSPlayer] {format} decode 失敗: {req.error}");
                     yield break;
                 }
 

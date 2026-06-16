@@ -48,6 +48,11 @@ namespace Siro
         public string[] idle_motions = new string[0];
         public int[] idle_interval_seconds = new int[] { 15, 45 };
 
+        // ===== Voice / TTS (Phase 1.5.1d) =====
+        // bridge /personas/{id} response 內 voice 區段(對齊 persona yaml `voice:` 區段)
+        // Unity 端要從這邊拿 TTS 設定送給 /tts/synthesize,不能 hard-code edge-tts
+        public PersonaVoiceConfig voice;
+
         /// <summary>
         /// 拿某 emotion 對應的 Live2D signal config
         /// </summary>
@@ -97,6 +102,31 @@ namespace Siro
         public int motion_index;
         public float intensity;
         public int duration_ms;
+    }
+
+    /// <summary>
+    /// TTS 聲線設定(Phase 1.5.1d)
+    /// 對齊 persona yaml `voice:` 區段 — provider / voice_id / ref_audio / ref_text
+    /// UnityTTSPlayer 會從這邊讀設定,而不是 hard-code fallback edge-tts
+    /// </summary>
+    [Serializable]
+    public class PersonaVoiceConfig
+    {
+        public string provider;      // "edge-tts" | "piper" | "f5-tts" | "gpt-sovits"
+        public string voice_id;      // 跨 provider 命名
+        public string language;      // BCP-47 e.g. "zh-TW"
+        public string gender;        // female | male
+        public float speed;          // 0.5-2.0
+        public float pitch;          // -10 ~ +10 semitones
+        public string format;        // mp3 | opus | wav
+        // F5-TTS 專用
+        public string ref_audio;     // 6-30 秒 wav 路徑
+        public string ref_text;      // ref_audio 對應文字
+        public int nfe_step;         // F5-TTS 推論步數 16-64
+        public float cfg_strength;   // F5-TTS CFG 1.0-3.0
+        // GPT-SoVITS 專用
+        public string refer_wav_path;
+        public string prompt_text;
     }
 
     /// <summary>
