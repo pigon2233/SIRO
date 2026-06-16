@@ -1286,6 +1286,129 @@ v0.x 進度（v0.2/v0.3/v0.3.1/v0.4/v0.4+）見「§5.5 v0.x 進度子表」。
 
 ---
 
+## 9.5 關鍵 Open Source 參考
+
+> 給未來開工時快速 recall「這個問題別人怎麼解」的索引。每次撞牆或 design 階段先掃這段、找有沒有現成 pattern 可參考。
+
+### 9.5.1 [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/open-llm-vtuber)（2026-06-17 加入）
+
+**License**: MIT（[Yi-Ting Chiu 2025](https://github.com/Open-LLM-VTuber/open-llm-vtuber)）— 自由引用 source code、改寫、credit 即可。
+
+**為什麼重要**:這是「跟我們幾乎同形」的產品 — Python backend + LLM agent + ASR → LLM → TTS + Live2D 角色 + 支援 barge-in。**直接同類**,不像參考 Live2D 商業軟體(VSeeFace)或 3D 角色動畫研究(MotionBricks)有 domain gap。
+
+**Stack 對照**:
+
+| | Open-LLM-VTuber | SIRO |
+|---|---|---|
+| Frontend | Web (瀏覽器) + Desktop (Electron-like) | **Unity 6 + Live2D** |
+| Backend | Python (FastAPI / aiohttp) | **Python (FastAPI)** ✅ 同 |
+| LLM | Ollama / OpenAI / Claude / vLLM | **Anthropic (default) + Ollama** ✅ 同 |
+| ASR | sherpa-onnx / FunASR / **Faster-Whisper** / Whisper.cpp / Whisper / Groq / Azure | **Faster-Whisper** (Phase 2) ✅ 同 |
+| TTS | sherpa-onnx / pyttsx3 / MeloTTS / Coqui / **GPTSoVITS** / Bark / CosyVoice / Edge / Fish / Azure | **F5-TTS + Edge-TTS + Piper + GPT-SoVITS** ✅ 重疊 |
+| VAD | **Silero VAD** (ML) | **Phase 2 規劃改 Silero** (原 ADR 0001 寫 webrtc-vad) |
+| Barge-in | ✅ without headphones | **Phase 2 設計採用** |
+| Live2D | ✅ 表情/emotion mapping | ✅ 已有 |
+| Agent framework | StatelessLLM + Tool use + multi-provider | **StatelessLLM 概念類似** |
+
+**4 個 SIRO 可直接 port 的 patterns** (有 source code 為證):
+
+#### Pattern 1: Silero VAD + State Machine + Control Tokens
+
+**Source**: [vad/silero.py](https://github.com/Open-LLM-VTuber/open-llm-vtuber/blob/main/src/open_llm_vtuber/vad/silero.py)
+
+- **State machine**: `IDLE` → `ACTIVE` → `INACTIVE` → `IDLE`
+- **雙訊號融合**:Silero ML `speech_prob` (threshold 0.4) + RMS `dB` (threshold 60)
+- **Smoothing window** (5 chunks) + **required_hits** (3 = 0.1s) + **required_misses** (24 = 0.8s) — 防誤觸發
+- **Pre-buffer** (20 chunks = 640ms) — 偵測到 speech start 時把開頭音補回來,**不會丟第一個字**
+- **Control tokens**:`<|PAUSE|>` (speech start) + `<|RESUME|>` (utterance end) — 把 VAD 事件變 stream 的 part-of-protocol,不是 callback hell
+- **Frame size**:32ms / 512 samples @ 16kHz
+
+**SIRO 套用**:port `bridge/vad/silero.py` 整個 state machine 出來、改用 `bytes`/`numpy` IO;WS 推 `vad_pause` / `vad_resume` control message 對應 tokens。
+
+#### Pattern 2: TTSTaskManager — Sequence Number + `clear()`
+
+**Source**: [conversations/tts_manager.py](https://github.com/Open-LLM-VTuber/open-llm-vtuber/blob/main/src/open_llm_vtuber/conversations/tts_manager.py)
+
+- 每個 TTS task 拿 monotonic sequence number
+- Sender task buffer 住 out-of-order payload,按 sequence 推送 — 支援 parallel TTS 但 ordered delivery
+- **`clear()` 方法**:取消 sender task + 清 task_list + reset state counter — **這就是 barge-in 的觸發點**
+- (注意:in-flight `async_generate_audio` task 沒被 `clear()` cancel,只丟棄 output — 對 streaming TTS 浪費一些 work,對 non-streaming OK)
+
+**SIRO 套用**:Phase 1.5.2 已經做了一半 — `tts_audio` 帶 `index` + Unity `SortedDictionary<int, BridgeTtsAudio>` 排隊。Phase 2 補上 **`turn_id` 過濾**(已存在 `tts_audio` index 但 turn 切換時不丟舊的),`clear()` 概念對應 Unity `audioSource.Stop() + _ttsQueue.Clear()`。
+
+#### Pattern 3: Agent `handle_interrupt()` — LLM 知道被中斷
+
+**Source**: [agent/agents/basic_memory_agent.py:195-225](https://github.com/Open-LLM-VTuber/open-llm-vtuber/blob/main/src/open_llm_vtuber/agent/agents/basic_memory_agent.py#L195)
+
+- 被打斷時 `agent.handle_interrupt(heard_response)` 被呼叫
+- 把 `[interrupted by user]` signal 注入 LLM context(`interrupt_method: "system"` 或 `"user"`)
+- LLM 看到這個 signal 知道剛才講到一半被插話、後續 response 會自然 acknowledge
+
+**SIRO 套用**:bridge 端 turn_id 切換時,推 `agent_interrupt` 訊息給 LLM client;LLM context 注入 `[interrupted by user]`。需要 Phase 2 STT 跟 LLM client 整合時做。
+
+#### Pattern 4: `asyncio.CancelledError` — 整個 conversation 可被 cancel
+
+**Source**: [conversations/single_conversation.py:164-166](https://github.com/Open-LLM-VTuber/open-llm-vtuber/blob/main/src/open_llm_vtuber/conversations/single_conversation.py#L164)
+
+```python
+except asyncio.CancelledError:
+    logger.info(f"🤡👍 Conversation {session_emoji} cancelled because interrupted.")
+    raise
+```
+
+- 整個 `process_single_conversation` 是 `asyncio.Task`
+- 外部 cancel task → LLM stream 停、TTS 清、finally 區塊做 cleanup
+- **比「自己寫 interrupt flag + 檢查點」乾淨 100 倍** — Python asyncio 內建機制
+
+**SIRO 套用**:bridge 端每輪對話是一個 `asyncio.Task`;新 turn 進來時 `old_task.cancel()` → CancelledError 自然 raise → cleanup 自動跑(`cleanup_conversation` 對應 `tts_manager.clear()`)。Unity 端 turn_id mismatch 也 cancel 對應的 chunk 處理 task。
+
+**Barge-in without headphones 是怎麼做到**:source code 翻完**沒找到 explicit echo cancellation**!靠的是 (1) 瀏覽器 `getUserMedia` 內建 WebRTC AEC,(2) Silero VAD 本來就 robust(ML 判斷力 + dB threshold + pre-buffer)。SIRO 沒瀏覽器 — 見 §9.5.3。
+
+### 9.5.2 SIRO 採用後的影響範圍
+
+| Phase | 影響 |
+|---|---|
+| **Phase 1.5.2 (TTS polish)** ✅ 已做 | `tts_audio` index 對應 Pattern 2 的一部分 |
+| **Phase 2 STT** ⏳ 下一個 | port 整個 Pattern 1 (VAD) + Pattern 2 補 turn_id + Pattern 3 (LLM interrupt signal) + Pattern 4 (task cancel) |
+| **Phase 5 Assistant** ⏳ | Pattern 2 概念延伸到 tool result streaming(序列號 + clear for interrupt) |
+| **Phase 6 Proactive** ⏳ | Pattern 1 概念延伸到「idle 偵測」(VAD 反過來用 — 沉默 N 秒觸發 proactive) |
+
+**ADR 更新**:
+- `docs/ADR/0001-stt-tts-選型.md` 原本 VAD 寫 `webrtc-vad` — Phase 2 開工時要改成 `Silero VAD`,理由 + Pattern 1 引用
+- `docs/STT_INTEGRATION.md` (Phase 2 開工要寫) 主要 design 來自本節
+
+### 9.5.3 AEC (Acoustic Echo Cancellation) — 給 SIRO 特別注意
+
+Open-LLM-VTuber 的「barge-in without headphones」靠瀏覽器內建 AEC。**SIRO 是 Unity,沒瀏覽器**。Phase 2 必須自己解:
+
+| 方案 | 實作 | trade-off | 推薦 phase |
+|---|---|---|---|
+| **A. Volume ducking** | VAD 偵測到 user speech → Unity `audioSource.volume = 0`;VAD idle 0.5s 後恢復 | 5 行 code,但 Mao 講話時自己消音(突兀) | **Phase 2 ship** |
+| **B. Unity WebRTC package** | `com.unity.webrtc` 的 `AudioProcessing` 內建 AEC | 業界標準,但要裝 package、build 時間變長 | Phase 2.5 polish |
+| **C. 文件「建議戴耳機」** | 不解,文件寫清楚 | 0 work 但 UX 不達標 | 不可 |
+
+**建議**:Phase 2 ship **A (ducking)**,Phase 2.5 升 **B (WebRTC AEC)**。`docs/STT_INTEGRATION.md` 開工時要把這決策寫進去。
+
+### 9.5.4 其他觀察 (值得未來 recall)
+
+- **`vad_main()` 範例** ([silero.py:191](https://github.com/Open-LLM-VTuber/open-llm-vtuber/blob/main/src/open_llm_vtuber/vad/silero.py#L191)) — websocket server 從 mic 收 chunk、跑 VAD 的 reference loop。Phase 2 STT integration test 可以抄
+- **`asr/asr_factory.py`** — 多 ASR backend 統一介面(同 SIRO `bridge/tts/` 結構),**驗證了我們的 TTS 抽象層設計方向**
+- **`live2d_model.py`** — 表情/emotion/motion mapping 集中管理;SIRO 現有 emotion parser + persona yaml 概念類似
+- **`agent/agents/basic_memory_agent.py`** — multi-turn 對話 + 工具呼叫 + interrupt 整合,值得 Phase 5 開工時仔細讀
+- **`conversations/group_conversation.py`** — 多人對話模式,跟 SIRO GAPS #8 (多人識別) 直接對應,Phase 6 開工時再看
+- **Desktop pet mode** (transparent + top-most + click-through) — **對標 Phase 3 UI 完善**「系統匣 icon」甚至「desktop overlay」可考慮
+
+### 9.5.5 用法
+
+未來開工撞牆時:
+1. 先看本節 4 個 pattern + 9.5.3 AEC
+2. 對應的 SIRO phase + 檔案
+3. 找不到再去看 Open-LLM-VTuber source code(整包 clone 在 `/tmp/vtuber-ref/`)
+
+**絕對不要直接抄 source code 進 SIRO** — 兩個專案 stack 不同(他們 web/electron 我們 Unity、asyncio 風格也有差)。**抄 design pattern、用 SIRO 自己的 stack 重新實作**。
+
+---
+
 ## 10. AI 協作開發指南
 
 ### 10.1 為什麼這份計畫書對 AI 友善
@@ -1428,6 +1551,7 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 | 日期       | 版本   | 變更                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-17 | v3.8   | **加入 §9.5 關鍵 Open Source 參考**:把 [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/open-llm-vtuber) (MIT) 收進 plan 作為 STT / VAD / barge-in / agent interrupt 的 reference。整理 4 個可 port 的 pattern (Silero VAD state machine + TTSTaskManager sequence/clear + agent handle_interrupt + asyncio.CancelledError task cancel) + §9.5.3 AEC 特別注意事項 (SIRO 是 Unity 沒瀏覽器內建 AEC,要自己做 — Phase 2 先做 volume ducking,2.5 升 Unity WebRTC package)。**影響 Phase 2 STT 設計** (下一個開工 phase):VAD 從 ADR 0001 的 `webrtc-vad` 改 `Silero VAD`、turn_id 過 TTS chunks、barge-in 觸發 tts_manager clear() pattern。docs/ADR/0001-stt-tts-選型.md 待修。 |
 | 2026-06-14 | v3.7   | **gemma4 本地 LLM 路徑完全 revert**：移除 `bridge/gemma4_server.py` (HF transformers OpenAI-compat server)、`bridge/gemma4_requirements.txt`、`bridge/main.py` 的 `_prewarm_ollama` helper、`bridge/minimax_streaming_client.py` 的 OpenAI-compat 分支 + `<unusedN>` 過濾、`bridge/emotion_parser.py` 的 `EMOTION_TAG_PATTERN_GEMMA`、32GB 本地模型 (`models/gemma-3-1b-it` / `gemma-4-E4B-it` / `-full`)、`ollama/Modelfile.siro-gemma4*`、`docs/GEMMA4_SERVER.md`、`tests/bridge/test_gemma4_multimodal.py`、`scripts/dev/download_gemma4.py`、`.gitignore` 加 `models/` 跟 `ollama/`、`bridge/requirements.txt` 拿掉 `pillow` / `requests`、`.env.example` 把 `HERMES_LLM_*` 翻成 `anthropic` / `MiniMax-M3`。**決策原因**：gemma-4-E4B-it 9.2GB 載入 30-60s + 推論品質不穩，跟「SIRO 開機直接是角色、UX 流暢」衝突。**保留** v1.5+ Computer Control（15 tools / sandbox / WS confirmation / SQLite memory）和 v1.5.3 gRPC 化（13 個 RPC），281 個 Python 測試 + 38 個 Rust 測試全綠、bridge 啟動 log 0 gemma 引用。架構簡化回「雲端 Anthropic (預設) + Ollama llama3.2 (soft fallback)」雙層 |
 | 2026-06-08 | v3.6   | v1.5+ Computer Control 完成：15 個 LLM tool（filesystem 5 / shell 1 / memory 4 / meta 3 + set_mood / play_motion）+ 三層安全護欄（sandbox + rate limit + audit log）+ WS confirmation broker + multi-turn agent loop + SQLite 長期記憶。`bridge/security.py` `bridge/confirmation.py` `bridge/tools/` package 新建、`bridge/main.py` `minimax_streaming_client.py` `tasks/llm_reply_task.py` `personas/siro-default.yaml` 修改。**Phase 3 改 ✅ 完成**、Phase 1-3 audit 通過（327 tests pass + 0 hardcoded secrets + 0 TODO/FIXME）。文件 `docs/PLANS/agent-computer-control.md` 新建完整設計書 |
 | 2026-06-05 | v3.5   | Phase 2 4 個視覺項目收尾：表情過渡 blendLockDuration (commit 6908730) + motion.play 範例 (198413c) + Loading disable input + dots (24ab90a) + 截圖功能 ScreenshotCapture (4e3fe78)。響應時間 Ollama timeout 15s→3s (9e205dc)。新增`docs/TROUBLESHOOTING.md` 10 段排查手冊 (a0d24c3)。Phase 2 4 視覺都 ✅、剩 v1.5+ LLM tool calling                                                                                      |
@@ -1452,7 +1576,7 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 - [X] `siro-runtime/src/grpc.rs` 8 個 RPC 全部 stub 化、GetStatus + Health 簡單實作
 - [X] `siro-runtime/src/main.rs` 啟動 tokio runtime + tonic gRPC server（預設 127.0.0.1:50051、`--grpc-addr` 可覆蓋）
 - [X] `os-runtime/README.md` 加 protoc 安裝指引（Ubuntu/macOS/Windows）+ 故障排除
-- [X] `docs/ADR/0001-stt-tts-選型.md` — STT (whisper.cpp) / TTS (piper) / Audio I/O (cpal) / VAD (webrtc-vad) 選型
+- [X] `docs/ADR/0001-stt-tts-選型.md` — STT (whisper.cpp) / TTS (piper) / Audio I/O (cpal) / VAD (**2026-06-17 待修 → Silero VAD**, 見 §9.5.1 Pattern 1) 選型
 - [X] `docs/ADR/0002-subsystem-failure-對話對應.md` — 12 個 subsystem × Unity UX × persona dialog 對應表
 - [X] `docs/PHASE2_TEST_REPORT.md` — Phase 2 23 個交付物盤點 + KPI 量化
 
