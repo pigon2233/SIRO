@@ -14,7 +14,7 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace SIRO
+namespace Siro
 {
     /// <summary>
     /// Always-on 麥克風擷取 → 32ms chunks 送 bridge SileroVAD
