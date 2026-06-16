@@ -50,5 +50,10 @@ f5-tts>=2024.10.0
 soundfile>=0.12.1
 vocos>=0.1.0
 jieba>=0.42.1
+# pyarrow 必須鎖 21.x:24.0.0 在 Windows + transformers 內某 import chain 觸發
+#   access violation(Windows fatal exception、process silent crash)
+# 21.0.0 是 datasets 5.0.0 最低要求 + 不會 access violation 的最後版本
+# 詳細 root cause 見 docs/TTS_F5_INTEGRATION.md 「Phase 1.5.1c pyarrow silent crash」
+pyarrow==21.0.0
 pypinyin>=0.51.0
 
