@@ -301,6 +301,8 @@ namespace Siro
 
         private async void Start()
         {
+            // Day 8.5 hotfix:印 verboseLogging 實際值、幫 debug 確認 Editor 有重編
+            Debug.Log($"[HermesBridge] Start: verboseLogging={verboseLogging} (Day 8 default=false)");
             await ConnectAsync();
         }
 
