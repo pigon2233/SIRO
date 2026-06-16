@@ -241,6 +241,66 @@ class TestTTSOrchestrator:
         # 每句都應該有 audio chunk
         assert len([c for _, c in result if c]) >= 3
 
+    def test_synthesize_stream_strips_emotion_tag(self):
+        """Phase 1.5.2a: TTS 進 provider 前要清掉 [emotion:xxx]"""
+        from bridge.tts.stream import _clean_for_tts
+        assert _clean_for_tts("[emotion:happy] 你好！") == "你好！"
+        assert _clean_for_tts("[emotion:neutral] 今天天氣真好") == "今天天氣真好"
+        assert _clean_for_tts("我[emotion:sad]很難過") == "我很難過"
+        # 沒標籤就原樣
+        assert _clean_for_tts("你好世界") == "你好世界"
+
+    def test_synthesize_stream_strips_emoji(self):
+        """Phase 1.5.2a: 也要清掉 emoji(Unity TMP 顯示成 □、TTS 唸出來也怪)"""
+        from bridge.tts.stream import _clean_for_tts
+        # emoji 拿掉後 re.sub 會把連續空白壓成 1 個
+        assert _clean_for_tts("你好 😀 世界") == "你好 世界"
+        assert _clean_for_tts("完成 ✅ 任務") == "完成 任務"
+
+    def test_synthesize_stream_passes_clean_text_to_provider(self):
+        """整合測試:synthesize_stream 收到的 text 經過 strip 才送給 provider"""
+        p = FakeTTSProvider("test")
+        orch = TTSOrchestrator(providers=[p])
+        cfg = TTSConfig(voice_id="test", language="zh-TW", provider="test")
+
+        async def collect():
+            chunks = []
+            async for c in orch.synthesize_stream("[emotion:happy] 你好世界！", cfg):
+                chunks.append(c)
+            return chunks
+
+        result = asyncio.run(collect())
+        # provider 收到的 text 已經清過
+        assert p.synthesize_last_text == "你好世界！"
+        assert len(result) == 3  # 預設 chunks
+
+    def test_synthesize_stream_skips_when_clean_is_empty(self):
+        """只有 [emotion:xxx] tag、clean 後是空 → 跳過 provider、不噴 chunk"""
+        p = FakeTTSProvider("test")
+        orch = TTSOrchestrator(providers=[p])
+        cfg = TTSConfig(voice_id="test", language="zh-TW", provider="test")
+
+        async def collect():
+            chunks = []
+            async for c in orch.synthesize_stream("[emotion:happy]", cfg):
+                chunks.append(c)
+            return chunks
+
+        result = asyncio.run(collect())
+        assert result == []
+        # provider 不該被叫
+        assert p.synthesize_call_count == 0
+
+    def test_synthesize_sentence_stream_strips_tags_before_splitting(self):
+        """synthesize_sentence_stream 也要先 strip 再切句(避免 [emotion:xxx] 殘留)"""
+        from bridge.tts.stream import _clean_for_tts
+        # 直接測 _clean_for_tts 對多句 prefix 的處理
+        raw = "[emotion:happy] 你好.我是 SIRO.[emotion:neutral] 今天好."
+        cleaned = _clean_for_tts(raw)
+        assert "[emotion:" not in cleaned
+        # strip 後 tag 變空白、會被 [ \t]+ 壓成單一空白
+        assert cleaned == "你好.我是 SIRO. 今天好."
+
 
 # ============================================================
 # EdgeTTSProvider (mock edge-tts)

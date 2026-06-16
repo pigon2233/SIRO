@@ -10,12 +10,16 @@ bridge/tts/stream.py - TTS streaming orchestrator
 - LLM 出 token → 累積到完整句子 → 切給 TTS
 - TTS synthesize_stream() 串流音檔 → yield 給 caller
 - 一個 sentence 一個 TTS request(並行,不是 sequence)
+
+Phase 1.5.2a: TTS 進 provider 前先清掉 LLM 情緒標籤 + emoji,
+避免 F5-TTS / edge-tts 把 `[emotion:happy]` 唸出來。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import AsyncIterator
 
 from .base import TTSConfig, TTSProvider
@@ -28,9 +32,27 @@ logger = logging.getLogger(__name__)
 
 # 簡單的句子切割(中英文都支援)
 # 完整版該用結巴 / spaCy / langdetect,先求 work 再求好
-import re
-
 _SENTENCE_END = re.compile(r"(?<=[。！？!?\.])")
+
+
+# Phase 1.5.2a: 從 emotion_parser 借 regex 清掉 LLM 標籤 + emoji
+# 避免 F5-TTS / edge-tts 把 `[emotion:happy]` 唸出來
+# 複用 emotion_parser 的常數、不重複定義
+from ..emotion_parser import EMOTION_TAG_PATTERN, EMOJI_PATTERN
+
+
+def _clean_for_tts(raw: str) -> str:
+    """準備要送進 TTS provider 的純文字
+
+    跟 emotion_parser._clean_for_display 一樣的邏輯、但放在 TTS 層
+    確保「不管 caller 是誰」(HTTP route / WS streaming / 直接 call)都會清。
+    """
+    if not raw:
+        return ""
+    s = EMOTION_TAG_PATTERN.sub("", raw)
+    s = EMOJI_PATTERN.sub("", s)
+    s = re.sub(r"[ \t]+", " ", s)
+    return s.strip()
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -115,6 +137,13 @@ class TTSOrchestrator:
           (user/persona 已經選了 F5-TTS,不該偷偷換 edge-tts)
         - config.provider 是 "auto" / 沒指定 → 走 providers 順序,第一個 is_available 的
         """
+        # Phase 1.5.2a: 進 TTS 前先清掉 emotion tag + emoji
+        # 避免 F5-TTS / edge-tts 把 `[emotion:happy]` 唸出來
+        clean_text = _clean_for_tts(text)
+        if not clean_text:
+            logger.warning("[tts] clean_for_tts 後是空字串、跳過")
+            return
+
         # 判斷 config.provider 是不是「明確指定」特定 provider
         explicit_provider_names = {p.name for p in self.providers}
         if config.provider in explicit_provider_names:
@@ -123,9 +152,9 @@ class TTSOrchestrator:
                 if p.name == config.provider:
                     logger.debug(
                         f"[tts] synthesize via {p.name} (explicit): "
-                        f"voice={config.voice_id} text_len={len(text)}"
+                        f"voice={config.voice_id} text_len={len(clean_text)}"
                     )
-                    async for chunk in p.synthesize(text, config):
+                    async for chunk in p.synthesize(clean_text, config):
                         yield chunk
                     async with self._active_lock:
                         self._active_provider = p
@@ -137,9 +166,9 @@ class TTSOrchestrator:
         provider = await self.get_active_provider()
         logger.debug(
             f"[tts] synthesize via {provider.name} (auto): voice={config.voice_id} "
-            f"text_len={len(text)}"
+            f"text_len={len(clean_text)}"
         )
-        async for chunk in provider.synthesize(text, config):
+        async for chunk in provider.synthesize(clean_text, config):
             yield chunk
 
     async def synthesize_sentence_stream(
@@ -157,8 +186,12 @@ class TTSOrchestrator:
         Yields:
             (sentence, audio_chunk) tuples
         """
+        # Phase 1.5.2a: 整段先清一次(防止 strip 後某句變空字串被誤切)
+        clean_text = _clean_for_tts(text)
+        if not clean_text:
+            return
         provider = await self.get_active_provider()
-        sentences = _split_sentences(text)
+        sentences = _split_sentences(clean_text)
         logger.debug(
             f"[tts] synthesize {len(sentences)} sentences via {provider.name}"
         )

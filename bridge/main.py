@@ -171,6 +171,12 @@ class BridgeState:
         # v1.5+：Confirmation broker — SIRO 危險操作前問 user
         # 初始化在 lifespan 內（要等 WS 連上才能廣播）
         self.confirmation_broker: Optional[ConfirmationBroker] = None
+        # Phase 1.5.2b：句子級 TTS streaming
+        # true → /ws 邊收 LLM delta 邊偵測句尾、每句背景 TTS 完成就推 tts_audio WS
+        # 降低第一個音檔抵達 Unity 的時間(原 30s+ 變 8-10s)
+        # 預設 false — 既有 Unity TTS 流程(收到 response 才 TTS)不破壞
+        # 開:SIRO_TTS_STREAMING=true
+        self.use_tts_streaming = os.environ.get("SIRO_TTS_STREAMING", "false").lower() == "true"
 
 
 state = BridgeState()
@@ -329,6 +335,68 @@ def _build_parser_for_persona(persona_name: str) -> EmotionParser:
     parser = EmotionParser(persona_expressions=expressions)
     state.parser_cache[cache_key] = parser
     return parser
+
+
+# ============================================================
+# Phase 1.5.2b: 句子級 TTS streaming helper
+# ============================================================
+
+async def _stream_tts_for_sentence(
+    websocket: WebSocket,
+    sentence: str,
+    sentence_index: int,
+    persona_id: str,
+    tts_format: str = "wav",
+) -> None:
+    """背景 TTS 一個句子 → 推 WS `tts_audio` 給 Unity
+
+    Args:
+        websocket: Unity 的 WebSocket connection
+        sentence: 完整的一句(已 strip [emotion:xxx])
+        sentence_index: 句子的全域編號(給 Unity 排序用)
+        persona_id: 載 persona voice config 用
+        tts_format: 音檔格式(wav / mp3 / opus)
+
+    設計:
+    - fire-and-forget:被 caller 用 asyncio.create_task 啟動
+    - 失敗不 raise:只在 log 記,不要炸 LLM streaming 主流程
+    - 推完 tts_audio 後 Unity 自己排隊播放
+    """
+    if not sentence.strip():
+        return
+    try:
+        from .tts import TTSConfig
+        from .tts.voices import get_voice_for_persona
+        from .tts import get_tts_orchestrator
+        # 拿 persona voice config(包含 F5-TTS ref_audio / ref_text)
+        try:
+            voice_cfg = get_voice_for_persona(persona_id)
+        except Exception:
+            voice_cfg = TTSConfig(voice_id="zh-TW-HsiaoChenNeural", language="zh-TW")
+        orchestrator = get_tts_orchestrator()
+        # 累積 audio chunks
+        chunks: list[bytes] = []
+        async for chunk in orchestrator.synthesize_stream(sentence, voice_cfg):
+            chunks.append(chunk)
+        if not chunks:
+            logger.warning(f"[tts-stream] sentence #{sentence_index} TTS 沒產出音檔")
+            return
+        import base64
+        audio_bytes = b"".join(chunks)
+        await websocket.send_json({
+            "type": "tts_audio",
+            "index": sentence_index,
+            "sentence": sentence,
+            "format": tts_format,
+            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+            "provider": voice_cfg.provider,
+        })
+        logger.debug(
+            f"[tts-stream] 推 sentence #{sentence_index}: "
+            f"len={len(sentence)} audio={len(audio_bytes)}B via {voice_cfg.provider}"
+        )
+    except Exception as e:
+        logger.error(f"[tts-stream] sentence #{sentence_index} TTS 失敗: {e}")
 
 
 @asynccontextmanager
@@ -1639,6 +1707,12 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
         full_text_parts: list[str] = []
         ttft_ms: Optional[int] = None
         tool_use_event = None  # v1.5+ LLM 選 tool 的事件
+        # Phase 1.5.2b: 句子級 TTS streaming
+        # LLM 出 token 邊累積邊切句、每句背景 invoke TTS
+        from .tts.sentence_buffer import SentenceBuffer
+        sentence_buffer = SentenceBuffer()
+        sentence_idx_counter = 0
+        tts_tasks: list = []  # background TTS task references
         try:
             async for event in state.streaming_client.chat_stream_with_tools(
                 message=stream_prompt,
@@ -1656,6 +1730,16 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                         "type": "delta",
                         "text": event.text,
                     })
+                    # 句子切割 → 背景觸發 TTS
+                    if state.use_tts_streaming:
+                        for sentence in sentence_buffer.feed(event.text):
+                            sentence_idx_counter += 1
+                            tts_tasks.append(asyncio.create_task(
+                                _stream_tts_for_sentence(
+                                    websocket, sentence, sentence_idx_counter,
+                                    persona_id=personality,
+                                )
+                            ))
                 elif event.type == "tool_use":
                     # v1.5+ LLM 選 tool（v1.5 一次只一個、記第一個）
                     if tool_use_event is None:
@@ -1684,6 +1768,21 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
             return
 
         full_text = "".join(full_text_parts)
+        # Phase 1.5.2b: 收尾 — 殘餘 buffer 也 TTS,等所有 TTS task 結束
+        if state.use_tts_streaming:
+            for sentence in sentence_buffer.flush():
+                sentence_idx_counter += 1
+                tts_tasks.append(asyncio.create_task(
+                    _stream_tts_for_sentence(
+                        websocket, sentence, sentence_idx_counter,
+                        persona_id=personality,
+                    )
+                ))
+            if tts_tasks:
+                logger.info(
+                    f"⏱ [tts-stream] 等待 {len(tts_tasks)} 個句子 TTS 完成..."
+                )
+                await asyncio.gather(*tts_tasks, return_exceptions=True)
         t_stream_total = int((time.time() - t_stream_start) * 1000)
         logger.info(
             f"💬 [ws-tool-calling] user={message[:40]!r} → llm={full_text[:80]!r} "
@@ -1774,6 +1873,11 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
         delta_count = 0
         full_text_parts: list[str] = []
         ttft_ms: Optional[int] = None
+        # Phase 1.5.2b: 句子級 TTS streaming(plain path 沒有 tool use)
+        from .tts.sentence_buffer import SentenceBuffer
+        sentence_buffer = SentenceBuffer()
+        sentence_idx_counter = 0
+        tts_tasks: list = []
         try:
             async for chunk in state.streaming_client.chat_stream(
                 message=stream_prompt,
@@ -1789,6 +1893,16 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                     "type": "delta",
                     "text": chunk,
                 })
+                # 句子切割 → 背景觸發 TTS
+                if state.use_tts_streaming:
+                    for sentence in sentence_buffer.feed(chunk):
+                        sentence_idx_counter += 1
+                        tts_tasks.append(asyncio.create_task(
+                            _stream_tts_for_sentence(
+                                websocket, sentence, sentence_idx_counter,
+                                persona_id=personality,
+                            )
+                        ))
         except Exception as e:
             logger.error(f"[ws] streaming 失敗: {e}")
             # streaming 失敗 → 走 fallback（跟 sync 路徑的 hermes 失敗同樣處理）
@@ -1811,6 +1925,21 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
             return
 
         full_text = "".join(full_text_parts)
+        # Phase 1.5.2b: 收尾 — 殘餘 buffer 也 TTS,等所有 TTS task 結束
+        if state.use_tts_streaming:
+            for sentence in sentence_buffer.flush():
+                sentence_idx_counter += 1
+                tts_tasks.append(asyncio.create_task(
+                    _stream_tts_for_sentence(
+                        websocket, sentence, sentence_idx_counter,
+                        persona_id=personality,
+                    )
+                ))
+            if tts_tasks:
+                logger.info(
+                    f"⏱ [tts-stream] 等待 {len(tts_tasks)} 個句子 TTS 完成..."
+                )
+                await asyncio.gather(*tts_tasks, return_exceptions=True)
         t_stream_total = int((time.time() - t_stream_start) * 1000)
         logger.info(
             f"💬 [ws-streaming] user={message[:40]!r} → llm={full_text[:80]!r} "

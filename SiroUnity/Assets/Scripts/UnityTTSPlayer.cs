@@ -15,6 +15,11 @@
 // - 訂閱 PersonaManager.OnPersonaChanged 自動重載 voice config
 // - 訂閱 ChatInputUI 收到 user 訊息時不要 TTS(自己講話自己不必複頌)
 //
+// Phase 1.5.2b: 訂閱 HermesBridgeClient.OnBridgeTtsAudio 支援「句子級 TTS streaming」
+// - bridge 端 SIRO_TTS_STREAMING=true 時推 {"type":"tts_audio","index":N,"audio_base64":"..."}
+// - Unity 收到後按 index 排隊、依序播放(WS 雖然 in-order 但 TTS 完成時間不固定)
+// - 沒開 streaming 時(預設)走原本 Speak() → /tts/synthesize 整段流程
+//
 
 using System;
 using System.Collections;
@@ -68,6 +73,16 @@ namespace Siro
         private string _lastUserMessage = "";
 #pragma warning restore CS0414
 
+        // Phase 1.5.2b: 句子級 TTS audio queue
+        // 收到 tts_audio WS 訊息時,按 index 順序塞進 queue
+        // 當前音檔播完才 dequeue 下一個(避免同時講兩段)
+        // 設計:用 sorted list 而不是 queue,因為 TTS 完成時間不固定、
+        // 句子 2 可能比句子 1 先到(parallel TTS)、但播放必須按 1→2 順序
+        private readonly SortedDictionary<int, BridgeTtsAudio> _ttsQueue =
+            new SortedDictionary<int, BridgeTtsAudio>();
+        private int _nextExpectedIndex = 0;  // 下一個要播放的 index
+        private bool _isPlayingSentence = false;  // 防止 overlap
+
         // Awake
         private void Awake()
         {
@@ -102,6 +117,8 @@ namespace Siro
             {
                 bridge.OnBridgeResponse += HandleBridgeResponse;
                 bridge.OnBridgeError += HandleBridgeError;
+                // Phase 1.5.2b: 訂閱句子級 TTS audio
+                bridge.OnBridgeTtsAudio += HandleTtsAudio;
             }
 
             // 訂閱 persona 切換 → 重載 voice
@@ -123,6 +140,7 @@ namespace Siro
             {
                 bridge.OnBridgeResponse -= HandleBridgeResponse;
                 bridge.OnBridgeError -= HandleBridgeError;
+                bridge.OnBridgeTtsAudio -= HandleTtsAudio;
             }
             if (personaManager != null)
             {
@@ -172,6 +190,84 @@ namespace Siro
         private void HandleBridgeError(BridgeError error)
         {
             // 錯誤訊息不 TTS(避免吵到 user)
+        }
+
+        // Phase 1.5.2b: 收到 bridge 句子級 TTS audio chunk
+        // 設計:按 index 排隊,依序播放(WS 雖然 in-order 但 TTS 完成時間不固定)
+        private void HandleTtsAudio(BridgeTtsAudio audio)
+        {
+            if (audio == null || string.IsNullOrEmpty(audio.audio_base64))
+            {
+                Debug.LogWarning("[TTSPlayer] tts_audio 是空、跳過");
+                return;
+            }
+            if (muted)
+            {
+                Debug.Log("[TTSPlayer] muted → 跳過 TTS audio");
+                return;
+            }
+            // 放進 sorted queue
+            _ttsQueue[audio.index] = audio;
+            Debug.Log($"[TTSPlayer] 收到 tts_audio #{audio.index} " +
+                      $"len={audio.sentence?.Length ?? 0} format={audio.format} " +
+                      $"queue_size={_ttsQueue.Count}");
+
+            // 如果還沒在播放、啟動 queue 消費
+            if (!_isPlayingSentence)
+            {
+                StartCoroutine(ConsumeTtsQueue());
+            }
+        }
+
+        // Queue 消費:取最小的 index、decode、播放、播完繼續下一個
+        private IEnumerator ConsumeTtsQueue()
+        {
+            _isPlayingSentence = true;
+            try
+            {
+                while (_ttsQueue.Count > 0)
+                {
+                    // 取最小的 index(第一個 key)
+                    int firstIdx = -1;
+                    foreach (var k in _ttsQueue.Keys)
+                    {
+                        firstIdx = k;
+                        break;
+                    }
+                    if (firstIdx < 0) break;
+
+                    var audio = _ttsQueue[firstIdx];
+                    _ttsQueue.Remove(firstIdx);
+
+                    Debug.Log($"[TTSPlayer] 播放 tts_audio #{firstIdx} " +
+                              $"(剩 {_ttsQueue.Count} 個在 queue)");
+
+                    // decode base64 → audio bytes
+                    byte[] audioBytes;
+                    try
+                    {
+                        audioBytes = Convert.FromBase64String(audio.audio_base64);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"[TTSPlayer] tts_audio base64 decode 失敗: {e.Message}");
+                        continue;
+                    }
+
+                    // 寫暫存 + 載入 AudioClip + 播放
+                    // 用 IEnumerator 不會 block、其他事件可以照樣處理
+                    yield return LoadAudioAndPlay(audioBytes, audio.format ?? "wav");
+                }
+            }
+            finally
+            {
+                _isPlayingSentence = false;
+                if (_ttsQueue.Count > 0)
+                {
+                    Debug.LogWarning($"[TTSPlayer] queue 還有 {_ttsQueue.Count} 個沒播、繼續");
+                    StartCoroutine(ConsumeTtsQueue());
+                }
+            }
         }
 
         private void HandlePersonaChanged(PersonaConfig config)

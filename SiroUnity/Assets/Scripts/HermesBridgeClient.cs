@@ -99,6 +99,23 @@ namespace Siro
     }
 
     /// <summary>
+    /// Phase 1.5.2b: 句子級 TTS audio chunk
+    /// bridge 端 SIRO_TTS_STREAMING=true 時、LLM streaming 出 token → 偵測到句尾 →
+    /// 背景 TTS 該句 → 推 {"type":"tts_audio","index":N,"sentence":"...","format":"wav","audio_base64":"...","provider":"f5-tts"}
+    /// Unity 端用 OnBridgeTtsAudio 收到、按 index 排序 queue、依序播放
+    /// </summary>
+    [Serializable]
+    public class BridgeTtsAudio
+    {
+        public string type;          // 永遠 "tts_audio"
+        public int index;            // 句子編號(LLM 回應的第 N 句)
+        public string sentence;      // 該句文字(已 strip [emotion:xxx])
+        public string format;        // wav | mp3 | opus
+        public string audio_base64;  // base64 編碼的音檔 bytes
+        public string provider;      // f5-tts | edge-tts | piper-tts | gpt-sovits
+    }
+
+    /// <summary>
     /// v1.2 SendTask result
     /// bridge 端 task 成功完成時推 {"type":"task_result","task_id":"...","result":{...}}
     /// Unity 端 SendTaskAsync 內部 await 這個、訂閱 OnTaskResult 自己收
@@ -208,6 +225,7 @@ namespace Siro
         public event Action<BridgeMotionPlay> OnBridgeMotionPlay;  // v1.5+ LLM play_motion tool
         public event Action<BridgeConfirmationRequest> OnBridgeConfirmationRequest;  // v1.5+ 危險操作前詢問
         public event Action<BridgeConfirmationAcked> OnBridgeConfirmationAcked;     // v1.5+ confirmation_response 被收到
+        public event Action<BridgeTtsAudio> OnBridgeTtsAudio;  // Phase 1.5.2b 句子級 TTS audio chunk
         public event Action<JObject> OnBridgeToolAction;  // v1.5+ agent loop 過程中每個 tool call 的即時 event
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
@@ -657,6 +675,18 @@ namespace Siro
                         );
                         var motionPlay = j.ToObject<BridgeMotionPlay>();
                         OnBridgeMotionPlay?.Invoke(motionPlay);
+                        break;
+
+                    case "tts_audio":
+                        // Phase 1.5.2b: 句子級 TTS audio chunk
+                        // bridge 推 {"type":"tts_audio","index":N,"sentence":"...","format":"wav","audio_base64":"...","provider":"f5-tts"}
+                        // UnityTTSPlayer 訂閱 OnBridgeTtsAudio、decode base64 → AudioClip → 排隊播放
+                        var ttsAudio = j.ToObject<BridgeTtsAudio>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] tts_audio #{ttsAudio.index}: "
+                            + $"len={ttsAudio.sentence?.Length ?? 0} format={ttsAudio.format} provider={ttsAudio.provider}"
+                        );
+                        OnBridgeTtsAudio?.Invoke(ttsAudio);
                         break;
 
                     case "task_result":
