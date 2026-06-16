@@ -51,6 +51,12 @@ namespace Siro
         private bool _isRecording;
         private Coroutine _captureLoop;
         private int _turnIdCounter = 0;
+        // Phase 2 STT (Day 8 fix):整段 mic 期間共用一個 utterance_turn_id
+        // mic 啟動時 ++ 一次,所有 chunk 都帶這個 id。
+        // 修原 bug:CaptureLoop 每 32ms NextTurnId() 會讓 _currentTurnId 一直跳
+        // → bridge 推回來的 tts_audio (用 pause 時的 turn_id) 跟 Unity 已經是 +30 的 _currentTurnId 不符 → 永遠被 drop
+        private int _utteranceTurnId = 0;
+        private int _chunkSeqCounter = 0;
 
         public enum MicState { Idle, Listening, SpeechDetected, Error }
         public MicState state { get; private set; } = MicState.Idle;
@@ -116,6 +122,12 @@ namespace Siro
                 UpdateRingColor();
                 return;
             }
+
+            // Day 8 fix:mic 啟動時遞增 1 個 utterance_turn_id
+            // 之後所有 mic chunk 共用這個 id,直到下次 StartMic
+            // (跟 ChatInputUI 的 NextTurnId 共用同一個 _turnIdCounter)
+            _utteranceTurnId = NextTurnId();
+            _chunkSeqCounter = 0;
 
             _device = Microphone.devices[0];
             try
@@ -190,10 +202,11 @@ namespace Siro
                         // float [-1, 1] → 16-bit PCM bytes
                         byte[] pcm = FloatToPcm16(buffer);
 
-                        // turn_id 遞增 → bridge 收到會做 VAD 跟 STT
-                        int tid = NextTurnId();
+                        // Day 8 fix:整段 mic 期間共用 _utteranceTurnId(不每 chunk ++)
+                        // chunk_seq 給 bridge 內部 trace 用(可選)
+                        _chunkSeqCounter++;
                         // fire-and-forget:不要 await capture loop
-                        _ = bridge.SendMicChunkAsync(tid, pcm);
+                        _ = bridge.SendMicChunkAsync(_utteranceTurnId, pcm);
                     }
                     else
                     {

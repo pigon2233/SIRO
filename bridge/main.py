@@ -2326,6 +2326,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # 餵 VAD,看有沒有 PAUSE/RESUME event
                 user_id = "default"  # TODO: 從 WS state 拿
                 personality = data.get("personality", "default")
+                # Day 8 fix:barge-in 被打斷 turn 的 last_heard 預設空字串
+                # pause 段會覆寫、resume 段直接讀這個值(避免查已被覆寫的 turn_manager.current_turn_id)
+                prev_heard = ""
                 for event in vad.feed(audio_bytes, turn_id):
                     if event.type.value == "pause":
                         # Speech start → 推 vad_pause 給 Unity、準備 cancel 舊 turn
@@ -2358,7 +2361,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                         # 啟動 ASR + LLM 流程
                         captured_audio = event.audio or b""
-                        captured_interrupted = last_heard.get(turn_manager.current_turn_id, "")
+                        # Day 8 fix:重用 pause 段算的 prev_heard(被打斷 turn 的 last_heard)
+                        # 不要重新查 turn_manager.current_turn_id(已被 start_new_turn 改成新 turn 了)
+                        captured_interrupted = prev_heard
                         async def run_stt_llm():
                             from .stt import FasterWhisperAsr
                             asr = FasterWhisperAsr()  # TODO:state cache

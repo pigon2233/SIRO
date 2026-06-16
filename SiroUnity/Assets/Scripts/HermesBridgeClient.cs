@@ -256,7 +256,9 @@ namespace Siro
         public int maxReconnectAttempts = 0; // 0 = 無限重試
 
         [Header("Debug")]
-        public bool verboseLogging = true;
+        // Day 8 fix:預設 false,避免 mic chunk 32ms 一個就刷一排 log 造成 console 洪水
+        // 想看詳細時可以在 Inspector 改成 true
+        public bool verboseLogging = false;
 
         // 事件 - 訂閱者從這裡收訊息
         public event Action<BridgeResponse> OnBridgeResponse;
