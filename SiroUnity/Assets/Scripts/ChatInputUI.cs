@@ -33,6 +33,12 @@ namespace Siro
         [Header("Status")]
         public string placeholderText = "輸入訊息...";
 
+        [Header("Phase 2 STT (optional)")]
+        [Tooltip("如果設了,共用 UnityMicInput 的 turn_id counter(讓 chat box 跟 mic 共享 monotonic ID)")]
+        public UnityMicInput micInput;
+        [Tooltip("如果設了,送出時會呼叫 SetCurrentTurnId(立即停舊 TTS)")]
+        public UnityTTSPlayer ttsPlayer;
+
         private HermesBridgeClient _bridge;
 
         // v0.3.1 SSE streaming：累積 delta 用的 buffer
@@ -152,7 +158,21 @@ namespace Siro
             _isWaitingForResponse = true;
             if (_thinkingDotsCoroutine != null) StopCoroutine(_thinkingDotsCoroutine);
             _thinkingDotsCoroutine = StartCoroutine(AnimateThinkingDots());
-            _ = _bridge.SendChatAsync(text);
+
+            // Phase 2 STT (Day 5):用 text_input 帶 turn_id
+            // 跟 mic 共用 counter(透過 UnityMicInput.NextTurnId)→ 跟 mic chunk 用同個 ID 空間
+            // 這樣 bridge 端 TurnManager 知道是「同一個對話脈絡」的 turn
+            if (micInput != null)
+            {
+                int turnId = micInput.NextTurnId();
+                if (ttsPlayer != null) ttsPlayer.SetCurrentTurnId(turnId);
+                _ = _bridge.SendTextInputAsync(turnId, text, userId: "default", personality: "default");
+            }
+            else
+            {
+                // 沒接 mic、legacy chat 流程(沒 turn_id)
+                _ = _bridge.SendChatAsync(text);
+            }
 
             if (clearAfterSend)
             {

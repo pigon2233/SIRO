@@ -87,6 +87,18 @@ namespace Siro
 #pragma warning restore CS0414
         private bool _isPlayingSentence = false;  // 防止 overlap
 
+        // ============================================================
+        // Phase 2 STT:turn_id 過濾(Pattern 2 — TTSTaskManager sequence)
+        // ============================================================
+        // 對應 design: docs/STT_INTEGRATION.md §'UnityTTSPlayer.cs 修改'
+        // 規則:_currentTurnId 跟最後一次「接受」的新 turn 對齊;
+        // 收到 tts_audio 時如果 audio.turn_id > 0 且 != _currentTurnId → drop
+        // (in-flight chunks from 上一個被 cancel 的 turn)
+        // 0 = legacy(沒開 STT、全部接受)
+#pragma warning disable CS0414  // 預留給未來 STT 整合(目前靠 SetCurrentTurnId 維護)
+        private int _currentTurnId = 0;
+#pragma warning restore CS0414
+
         // Awake
         private void Awake()
         {
@@ -239,13 +251,28 @@ namespace Siro
 
         /// <summary>
         /// Phase 2 STT:設定 current turn_id(給 ChatInputUI 文字輸入時呼叫)
-        /// 立即停舊 TTS 跟清 queue、跟 UnityMicInput 同步
-        /// Day 5 完整實作 + queue clear
+        /// 立即停舊 TTS + 清 queue + 重置 _currentTurnId
+        /// UnityMicInput 在 vad_pause 時也會呼叫(透過 bridge 收到 vad_pause → ttsPlayer.SetCurrentTurnId)
         /// </summary>
         public void SetCurrentTurnId(int turnId)
         {
-            // Day 5 完整實作(Day 4 留 stub)
-            Debug.Log($"[TTSPlayer] SetCurrentTurnId({turnId}) — Day 5 完整實作");
+            if (turnId == _currentTurnId)
+            {
+                // 同一 turn 重複設 → 冪等
+                return;
+            }
+            int oldTurn = _currentTurnId;
+            _currentTurnId = turnId;
+            // 立即停舊 TTS 播放
+            if (audioSource != null && audioSource.isPlaying)
+            {
+                audioSource.Stop();
+            }
+            // 清 queue(in-flight 舊 turn chunks 不播)
+            int dropped = _ttsQueue.Count;
+            _ttsQueue.Clear();
+            _isPlayingSentence = false;
+            Debug.Log($"[TTSPlayer] 🔄 turn_id {oldTurn} → {turnId} (stop + clear queue {dropped} chunks)");
         }
 
         // ==================== Event Handlers ====================
@@ -266,6 +293,8 @@ namespace Siro
 
         // Phase 1.5.2b: 收到 bridge 句子級 TTS audio chunk
         // 設計:按 index 排隊,依序播放(WS 雖然 in-order 但 TTS 完成時間不固定)
+        // Phase 2 STT:加 turn_id 過濾 — bridge 在 turn 取消時可能還有 in-flight chunks,
+        // 收到 turn_id != _currentTurnId 的 chunk → drop(對齊 Pattern 2 sequence)
         private void HandleTtsAudio(BridgeTtsAudio audio)
         {
             if (audio == null || string.IsNullOrEmpty(audio.audio_base64))
@@ -278,10 +307,18 @@ namespace Siro
                 Debug.Log("[TTSPlayer] muted → 跳過 TTS audio");
                 return;
             }
+            // Phase 2 STT:turn_id 過濾
+            // audio.turn_id == 0 → legacy chat(不過濾)
+            // audio.turn_id > 0 → Phase 2 STT 流程、必須 == _currentTurnId 才接
+            if (audio.turn_id > 0 && _currentTurnId > 0 && audio.turn_id != _currentTurnId)
+            {
+                Debug.Log($"[TTSPlayer] ⏬ drop tts_audio turn_id={audio.turn_id} (current={_currentTurnId})");
+                return;
+            }
             // 放進 sorted queue
             _ttsQueue[audio.index] = audio;
             Debug.Log($"[TTSPlayer] 收到 tts_audio #{audio.index} " +
-                      $"len={audio.sentence?.Length ?? 0} format={audio.format} " +
+                      $"turn={audio.turn_id} len={audio.sentence?.Length ?? 0} format={audio.format} " +
                       $"queue_size={_ttsQueue.Count}");
 
             // 如果還沒在播放、啟動 queue 消費

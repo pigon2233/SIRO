@@ -218,6 +218,10 @@ namespace Siro
         {
             if (verboseLogging) Debug.Log($"[MicInput] vad_pause turn_id={evt.turn_id}");
 
+            // Phase 2 STT:同步 TTSPlayer 的 current_turn_id
+            // → 立即停舊 TTS + 清 queue(barge-in flow)
+            if (ttsPlayer != null) ttsPlayer.SetCurrentTurnId(evt.turn_id);
+
             // AEC:降 TTS 音量避免 echo
             if (ttsPlayer != null) ttsPlayer.DuckVolume(true);
 
