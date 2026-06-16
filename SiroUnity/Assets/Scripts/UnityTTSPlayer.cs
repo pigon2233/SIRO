@@ -80,7 +80,11 @@ namespace Siro
         // 句子 2 可能比句子 1 先到(parallel TTS)、但播放必須按 1→2 順序
         private readonly SortedDictionary<int, BridgeTtsAudio> _ttsQueue =
             new SortedDictionary<int, BridgeTtsAudio>();
-        private int _nextExpectedIndex = 0;  // 下一個要播放的 index
+        // 預留給「嚴格 in-order 模式」(目前 ConsumeTtsQueue 用 sorted dict 第一個 key 就夠)
+        // 不用它也可以 work、暫時 suppress warning
+#pragma warning disable CS0414  // 預留給 in-order 嚴格模式
+        private int _nextExpectedIndex = 0;
+#pragma warning restore CS0414
         private bool _isPlayingSentence = false;  // 防止 overlap
 
         // Awake
