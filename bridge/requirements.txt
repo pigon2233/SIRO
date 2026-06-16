@@ -57,3 +57,10 @@ jieba>=0.42.1
 pyarrow==21.0.0
 pypinyin>=0.51.0
 
+# Phase 2 STT: Silero VAD + faster-whisper
+# 沒裝 import bridge.vad / bridge.stt 會 raise ImportError(要裝)
+# MIT,~2MB ONNX VAD model + CTranslate2 加速的 whisper.cpp Python binding
+silero-vad>=6.0.0          # 內建 VADIterator state machine
+faster-whisper>=1.0.0      # STT backend
+# Phase 2 音訊依賴(讓 numpy int16 ↔ float32 正確轉換,numpy 已經有所以不列)
+
