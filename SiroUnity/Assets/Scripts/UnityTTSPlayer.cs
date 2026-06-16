@@ -180,6 +180,74 @@ namespace Siro
             Debug.Log($"[TTSPlayer] muted={muted}");
         }
 
+        // ============================================================
+        // Phase 2 STT: AEC (Acoustic Echo Cancellation) volume ducking
+        // 對應 design: docs/STT_INTEGRATION.md §AEC 處理
+        // ============================================================
+        // Phase 2 簡易版:mic 收到 user 講話時,降 TTS 音量避免 echo
+        // Phase 2.5 升級:換 com.unity.webrtc 的 AudioProcessing 內建 AEC
+
+        [Header("AEC (Phase 2 STT)")]
+        [Tooltip("duck 後的音量(0 = 完全消音、Phase 2.5 用 WebRTC AEC 時改 0.2)")]
+        [Range(0f, 1f)]
+        public float duckedVolume = 0f;
+        [Tooltip("vad_resume 後延遲恢復的秒數(避免快速 speech toggle)")]
+        public float duckRestoreDelay = 0.5f;
+
+        private float _normalVolume = 1f;
+        private Coroutine _restoreVolumeCoroutine;
+
+        /// <summary>
+        /// Phase 2 STT AEC:vad_pause → DuckVolume(true) 立即消音
+        /// vad_resume → DuckVolume(false) 延遲 duckRestoreDelay 秒後恢復
+        /// </summary>
+        public void DuckVolume(bool duck)
+        {
+            if (audioSource == null) return;
+
+            // 取消之前 pending 的 restore
+            if (_restoreVolumeCoroutine != null)
+            {
+                StopCoroutine(_restoreVolumeCoroutine);
+                _restoreVolumeCoroutine = null;
+            }
+
+            if (duck)
+            {
+                // 立即消音
+                _normalVolume = audioSource.volume;
+                audioSource.volume = duckedVolume;
+                Debug.Log($"[TTSPlayer] 🦆 AEC duck: vol {audioSource.volume} → {duckedVolume}");
+            }
+            else
+            {
+                // 延遲恢復(給 user 講話結束的尾巴一點緩衝)
+                _restoreVolumeCoroutine = StartCoroutine(RestoreVolumeAfterDelay(duckRestoreDelay));
+            }
+        }
+
+        private System.Collections.IEnumerator RestoreVolumeAfterDelay(float delaySeconds)
+        {
+            yield return new WaitForSeconds(delaySeconds);
+            if (audioSource != null)
+            {
+                audioSource.volume = _normalVolume;
+                Debug.Log($"[TTSPlayer] 🦆 AEC restore: vol → {_normalVolume}");
+            }
+            _restoreVolumeCoroutine = null;
+        }
+
+        /// <summary>
+        /// Phase 2 STT:設定 current turn_id(給 ChatInputUI 文字輸入時呼叫)
+        /// 立即停舊 TTS 跟清 queue、跟 UnityMicInput 同步
+        /// Day 5 完整實作 + queue clear
+        /// </summary>
+        public void SetCurrentTurnId(int turnId)
+        {
+            // Day 5 完整實作(Day 4 留 stub)
+            Debug.Log($"[TTSPlayer] SetCurrentTurnId({turnId}) — Day 5 完整實作");
+        }
+
         // ==================== Event Handlers ====================
 
         private void HandleBridgeResponse(BridgeResponse response)

@@ -103,16 +103,58 @@ namespace Siro
     /// bridge 端 SIRO_TTS_STREAMING=true 時、LLM streaming 出 token → 偵測到句尾 →
     /// 背景 TTS 該句 → 推 {"type":"tts_audio","index":N,"sentence":"...","format":"wav","audio_base64":"...","provider":"f5-tts"}
     /// Unity 端用 OnBridgeTtsAudio 收到、按 index 排序 queue、依序播放
+    ///
+    /// Phase 2 STT (Day 4):加 turn_id 欄位 — Unity 端用來過濾舊 turn 的 in-flight chunks
     /// </summary>
     [Serializable]
     public class BridgeTtsAudio
     {
         public string type;          // 永遠 "tts_audio"
         public int index;            // 句子編號(LLM 回應的第 N 句)
+        public int turn_id;          // Phase 2 STT:Unity 端過濾(0 = legacy、不過濾)
         public string sentence;      // 該句文字(已 strip [emotion:xxx])
         public string format;        // wav | mp3 | opus
         public string audio_base64;  // base64 編碼的音檔 bytes
         public string provider;      // f5-tts | edge-tts | piper-tts | gpt-sovits
+    }
+
+    /// <summary>
+    /// Phase 2 STT (Day 4):bridge 偵測到 VAD PAUSE(speech start)
+    /// 推 {"type":"vad_pause","turn_id":N}
+    /// Unity 端用 OnBridgeVadPause 觸發 AEC ducking + 視覺 ring 變色
+    /// </summary>
+    [Serializable]
+    public class BridgeVadPause
+    {
+        public string type;     // 永遠 "vad_pause"
+        public int turn_id;
+    }
+
+    /// <summary>
+    /// Phase 2 STT (Day 4):bridge 偵測到 VAD RESUME(utterance end)
+    /// 推 {"type":"vad_resume","turn_id":N,"duration_ms":N,"audio_base64":"..."}
+    /// Unity 端用 OnBridgeVadResume 觸發 AEC restore + 顯示「處理中」
+    /// </summary>
+    [Serializable]
+    public class BridgeVadResume
+    {
+        public string type;          // 永遠 "vad_resume"
+        public int turn_id;
+        public int duration_ms;      // speech 持續時間(ms)
+        public string audio_base64;  // 16-bit PCM 音訊(給 Unity debug / record 用)
+    }
+
+    /// <summary>
+    /// Phase 2 STT (Day 3):LLM 被打斷通知
+    /// 推 {"type":"agent_interrupt","turn_id":N,"last_heard":"..."}
+    /// Unity 端用 OnBridgeAgentInterrupt 顯示「Mao 被打斷」視覺 cue
+    /// </summary>
+    [Serializable]
+    public class BridgeAgentInterrupt
+    {
+        public string type;       // 永遠 "agent_interrupt"
+        public int turn_id;
+        public string last_heard; // Mao 上一句講的話(被 user 打斷)
     }
 
     /// <summary>
@@ -229,6 +271,9 @@ namespace Siro
         public event Action<JObject> OnBridgeToolAction;  // v1.5+ agent loop 過程中每個 tool call 的即時 event
         public event Action OnBridgeConnected;
         public event Action OnBridgeDisconnected;
+        public event Action<BridgeVadPause> OnBridgeVadPause;  // Phase 2 STT (Day 4):VAD speech start
+        public event Action<BridgeVadResume> OnBridgeVadResume;  // Phase 2 STT (Day 4):VAD utterance end
+        public event Action<BridgeAgentInterrupt> OnBridgeAgentInterrupt;  // Phase 2 STT (Day 3):LLM 被打斷
         public event Action<int> OnReconnectAttempt;  // 參數：第 N 次嘗試
         public event Action OnReconnectGivingUp;     // 超過 maxReconnectAttempts
 
@@ -497,6 +542,44 @@ namespace Siro
             );
         }
 
+        /// <summary>
+        /// Phase 2 STT (Day 4):送 mic 32ms chunk 給 bridge
+        /// Unity 端 UnityMicInput 在 capture loop 裡呼叫
+        /// bridge 收到 → 餵 SileroVAD → 偵測到 PAUSE/RESUME 會回 vad_pause / vad_resume
+        ///
+        /// 音訊格式:16kHz 16-bit mono PCM、1024 bytes(= 512 samples @ 16kHz = 32ms)
+        /// turn_id:Unity 端自己產的 monotonic counter(每個 mic chunk +1)
+        /// </summary>
+        public async Task SendMicChunkAsync(int turnId, byte[] pcmBytes)
+        {
+            if (pcmBytes == null || pcmBytes.Length == 0) return;
+            var payload = new JObject
+            {
+                ["type"] = "mic_chunk",
+                ["turn_id"] = turnId,
+                ["audio_base64"] = Convert.ToBase64String(pcmBytes),
+            };
+            await SendJsonAsync(payload);
+        }
+
+        /// <summary>
+        /// Phase 2 STT (Day 4):送文字輸入(從 chat box)帶 turn_id
+        /// 跟 chat 一樣的 LLM 流程,但走 TurnManager + 帶 turn_id
+        /// </summary>
+        public async Task SendTextInputAsync(int turnId, string text, string userId = "default", string personality = "default")
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            var payload = new JObject
+            {
+                ["type"] = "text_input",
+                ["turn_id"] = turnId,
+                ["text"] = text,
+                ["user_id"] = userId,
+                ["personality"] = personality,
+            };
+            await SendJsonAsync(payload);
+        }
+
         private void StopReconnect()
         {
             if (_reconnectCoroutine != null)
@@ -679,14 +762,43 @@ namespace Siro
 
                     case "tts_audio":
                         // Phase 1.5.2b: 句子級 TTS audio chunk
-                        // bridge 推 {"type":"tts_audio","index":N,"sentence":"...","format":"wav","audio_base64":"...","provider":"f5-tts"}
+                        // bridge 推 {"type":"tts_audio","index":N,"turn_id":N,"sentence":"...","format":"wav","audio_base64":"...","provider":"f5-tts"}
                         // UnityTTSPlayer 訂閱 OnBridgeTtsAudio、decode base64 → AudioClip → 排隊播放
+                        // Phase 2 STT (Day 4):ttsAudio.turn_id > 0 時,UnityTTSPlayer 會過濾不符 current turn 的 chunk
                         var ttsAudio = j.ToObject<BridgeTtsAudio>();
                         if (verboseLogging) Debug.Log(
-                            $"[HermesBridge] tts_audio #{ttsAudio.index}: "
+                            $"[HermesBridge] tts_audio #{ttsAudio.index} turn={ttsAudio.turn_id}: "
                             + $"len={ttsAudio.sentence?.Length ?? 0} format={ttsAudio.format} provider={ttsAudio.provider}"
                         );
                         OnBridgeTtsAudio?.Invoke(ttsAudio);
+                        break;
+
+                    case "vad_pause":
+                        // Phase 2 STT (Day 4):VAD 偵測到 speech start
+                        var vadPause = j.ToObject<BridgeVadPause>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] vad_pause turn_id={vadPause.turn_id}"
+                        );
+                        OnBridgeVadPause?.Invoke(vadPause);
+                        break;
+
+                    case "vad_resume":
+                        // Phase 2 STT (Day 4):VAD 偵測到 utterance end
+                        var vadResume = j.ToObject<BridgeVadResume>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] vad_resume turn_id={vadResume.turn_id} duration={vadResume.duration_ms}ms"
+                        );
+                        OnBridgeVadResume?.Invoke(vadResume);
+                        break;
+
+                    case "agent_interrupt":
+                        // Phase 2 STT (Day 3):LLM 被打斷通知
+                        var agentInterrupt = j.ToObject<BridgeAgentInterrupt>();
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] agent_interrupt turn_id={agentInterrupt.turn_id} "
+                            + $"last_heard='{agentInterrupt.last_heard}'"
+                        );
+                        OnBridgeAgentInterrupt?.Invoke(agentInterrupt);
                         break;
 
                     case "task_result":
