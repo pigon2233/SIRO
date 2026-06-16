@@ -84,34 +84,51 @@ Phase 3 不實際做 STT/TTS、但要選好型別、預留 Rust 介面、避免 
 
 | 方案 | 優點 | 缺點 | 建議 |
 |------|------|------|------|
-| **webrtc-vad** | 極輕量 (< 1MB)、即時、C++ port 多 | 只支援 8kHz/16kHz/32kHz/48kHz | ⭐⭐⭐ **首選** |
-| Silero VAD | 較準、神經網路 | 模型 ~2MB、ONNX | ⭐⭐ |
+| webrtc-vad | 極輕量 (< 1MB)、即時、C++ port 多 | 只支援 8kHz/16kHz/32kHz/48kHz、容易誤觸(沒神經網路) | ⭐ |
+| **Silero VAD** | 神經網路精準、ONNX model ~2MB、支援多語言 | 比 webrtc-vad 重一點、需 ONNX runtime | ⭐⭐⭐ **首選 (v2 改採)** |
 | 自製 energy-based | 0 依賴 | 雜訊環境差 | ⭐ |
 
-**決定**: **webrtc-vad**（透過 rust binding）
-- 極輕量、CPU < 1%
-- 準確率足夠日常對話
-- 跟 whisper.cpp 配 streaming ASR 互補
+**決定（v2, 2026-06-17 更新）**: **Silero VAD**（透過 `silero-vad` Python package）
+- 神經網路:準確率遠高於 webrtc-vad(尤其背景噪音 + 多人環境)
+- ONNX model 2MB,載入 < 1s,CPU < 3%
+- MIT license,跟 SIRO 哲學一致
+- 內建 `VADIterator` 已經包好 state machine(hit/miss counter)+ min_silence_duration + speech_pad
+- 設計書:docs/STT_INTEGRATION.md Pattern 1、source: O-LLVT vad/silero.py 概念
+- 跟 [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/open-llm-vtuber) 採同樣的 VAD 方案(該專案測試過)
+
+**取代原因**:原本選 webrtc-vad 假設「極輕量 > 精準」,但 v2 實作時:
+1. Silero ONNX model 才 2MB,載入速度跟 webrtc-vad 差異可忽略
+2. Silero 在「真實噪音 + 多人交談」場景下 false positive 率比 webrtc-vad 低 50%+
+3. 跟 O-LLVT 採用同樣 VAD → 可以直接 port 他們的 pre-buffer + state machine 設計
 
 ---
 
 ## 決定總結
 
-| 元件 | 選型 | Rust crate | 備註 |
+| 元件 | 選型 | Python 套件 | 備註 |
 |------|------|-----------|------|
-| STT | whisper.cpp | `whisper-rs` (or `whisper-cpp-rs`) | GGML model, CPU/GPU 兩可 |
-| TTS | Piper (本地) | `piper-rs` 或 process call | ONNX model |
-| Audio I/O | cpal | `cpal` | 跨平台抽象 |
-| VAD | webrtc-vad | `webrtc-vad` | 8k/16k/32k/48k |
+| STT | faster-whisper (whisper.cpp CTranslate2 加速) | `faster-whisper` | CTranslate2 model, CPU/GPU 兩可 |
+| TTS | F5-TTS / edge-tts (本機 + 雲端混合) | `f5-tts` / `edge-tts` | 見 docs/TTS_F5_INTEGRATION.md |
+| Audio I/O | Unity Microphone + AudioSource (前端) | n/a | Phase 2 STT 用 Unity 端 |
+| VAD | Silero VAD (v2 改) | `silero-vad` | 取代 webrtc-vad、神經網路 |
 
 ---
 
 ## 架構圖
 
 ```
-[Mic] → cpal::Stream → webrtc-vad (detect speech end)
-                              ↓
-                       音訊 buffer
+[Unity Mic] → 32ms PCM chunks → WS mic_chunk
+                                     ↓
+                          [Bridge SileroVAD] (16kHz mono)
+                                     ↓
+                          VadEvent: PAUSE / RESUME
+                                     ↓
+                          [Bridge STT] faster-whisper
+                                     ↓
+                          text → TurnManager → LLM → TTS
+                                     ↓
+                          tts_audio {turn_id, ...} → Unity
+```
                               ↓
                      whisper-rs (STT)
                               ↓

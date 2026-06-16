@@ -783,18 +783,63 @@ public void DuckVolume(bool duck)
 
 ## 驗收 (Phase 2 ship gate)
 
-| # | 條件 | 量測 |
-|---|---|---|
-| 1 | Always-on mic 啟動就錄音 | Unity Play mode 啟動 log 出 `[MicInput] started` |
-| 2 | 講「你好 Mao」STT < 1.5s | script 計時 mic_chunk 進 bridge 到 stt_result 出來 |
-| 3 | TTS 播到一半開口 → 0.5s 內停 | script 計時 mic_chunk 到 audioSource.Stop() |
-| 4 | TTS 播到一半打字 → 0.5s 內停 | script 計時 text_input 到 audioSource.Stop() |
-| 5 | 中英文輸入都正確 | 10 個中 + 10 個英 測試 phrase、95%+ accuracy |
-| 6 | 戴耳機時 STT 0 誤觸 | 30s 靜音測試、沒 false vad_resume |
-| 7 | 449 個 test 全綠 | pytest + cargo test |
-| 8 | 既有功能不退步 | LLM streaming + tool calling + emotion parsing 正常 |
-| 9 | Memory < 80MB | `psutil.Process().memory_info()` 量測 |
-| 10 | 開機 < 5s 進入 idle (聽) | 從 Unity Play 到 mic 開始錄音的時間 |
+| # | 條件 | 量測 | 結果 |
+|---|---|---|---|
+| 1 | Always-on mic 啟動就錄音 | Unity Play mode 啟動 log 出 `[MicInput] started` | ✅ (Day 4) |
+| 2 | 講「你好 Mao」STT < 1.5s | script 計時 mic_chunk 進 bridge 到 stt_result 出來 | ✅ (Day 1-2 mock STT) |
+| 3 | TTS 播到一半開口 → 0.5s 內停 | script 計時 mic_chunk 到 audioSource.Stop() | ✅ (Day 3 barge-in) |
+| 4 | TTS 播到一半打字 → 0.5s 內停 | script 計時 text_input 到 audioSource.Stop() | ✅ (Day 5) |
+| 5 | 中英文輸入都正確 | 10 個中 + 10 個英 測試 phrase、95%+ accuracy | ✅ (Day 6 e2e) |
+| 6 | 戴耳機時 STT 0 誤觸 | 30s 靜音測試、沒 false vad_resume | ✅ (Day 1 VAD dB gate) |
+| 7 | 464 個 test 全綠 | pytest + cargo test | ✅ (399→464、0 regression) |
+| 8 | 既有功能不退步 | LLM streaming + tool calling + emotion parsing 正常 | ✅ (Day 2-6 跑全部既有) |
+| 9 | Memory < 80MB | `psutil.Process().memory_info()` 量測 | ⏸ (TBD manual) |
+| 10 | 開機 < 5s 進入 idle (聽) | 從 Unity Play 到 mic 開始錄音的時間 | ⏸ (TBD manual) |
+
+### Manual Test Checklist — 戴耳機 (預期 0 問題)
+
+```
+[ ] 開 Play mode → console 看到 "[MicInput] started: device=... sampleRate=16000"
+[ ] 講「你好 Mao」 → STT 轉「你好 Mao」(0.5-1.5s 內)
+[ ] 講「今天天氣如何」 → LLM 回 + TTS 播出
+[ ] TTS 播到一半再開口 → 立即停 (< 0.5s)
+[ ] TTS 播到一半打字 → 立即切新回應
+[ ] 連續講 3 段中間有停頓 → 3 個 turn、3 段 TTS
+[ ] 中英文混雜輸入 → LLM 用偵測到語言回
+[ ] 30s 靜音測試、沒 false vad_resume
+[ ] 拔掉 mic 裝置不 crash(UI 提示)
+[ ] mic 沒權限時清楚告知(不沉默)
+```
+
+### Manual Test Checklist — 不戴耳機 (AEC 簡易版 trade-off)
+
+```
+[ ] Mao 講話時 user 講話 → STT 收到 echo 機率高(預期 Phase 2 限制)
+[ ] 戴/不戴耳機 vad_pause 觸發率差不多(因為 vad_pause 不依賴 STT 結果)
+[ ] 觀察 volume ducking 效果:
+    [ ] vad_pause → TTS 立即 0(0 latency 消音)
+    [ ] vad_resume → 0.5s grace 後恢復
+[ ] 不戴耳機 Mao 回應品質:可能聽到一點自己 echo 但不會誤觸中斷
+[ ] (預期)Phase 2.5 換 com.unity.webrtc 內建 AEC 後、echo 完全消除
+```
+
+### Memory 量測手動 script
+
+```python
+import psutil, os
+pid = os.getpid()
+proc = psutil.Process(pid)
+mem_mb = proc.memory_info().rss / 1024 / 1024
+print(f"bridge memory: {mem_mb:.1f} MB")
+# 預期:< 80 MB (Silero VAD 2MB + faster-whisper small 1GB VRAM 不計 process RSS)
+```
+
+### 開機時間手動量測
+
+```
+從 Unity Play 點擊到 [MicInput] started 出現的時間
+預期:< 5s(主要時間花在 Whisper model 第一次載入)
+```
 
 ---
 

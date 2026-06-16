@@ -5,6 +5,77 @@
 
 ---
 
+## 2026-06-17 — Phase 2 STT ship: Mao 會聽了 🎙️
+
+**里程碑**：Mao 從「會說話」升級到「會聽」。Always-on mic + VAD + STT + LLM + TTS 完整 pipeline,支援 barge-in。
+
+User 3 個硬約束 100% 對齊:
+- ✅ **Always-listen** — UnityMicInput Play mode 啟動就 `Microphone.Start`,32ms 自動送 chunk
+- ✅ **講話中/還沒講話給新對話不抱錯** — `TurnManager` 自動 cancel 舊 turn + `asyncio.CancelledError` 自然 cleanup
+- ✅ **TTS 中斷用 turn_id** — bridge `tts_audio` payload 帶 `turn_id`、Unity `HandleTtsAudio` drop 不符 chunk
+
+### 6 個 commit (1 個設計書 + 6 個實作)
+
+| Commit | 內容 |
+|---|---|
+| `eb76557` | docs: Phase 2 STT 設計書 + O-LLVT 參考收進 plan |
+| `92d930c` | feat(stt) Day 1: VAD + STT module + 27 unit tests |
+| `25e1624` | feat(stt) Day 2: TurnManager + turn_id pipeline + 15 tests |
+| `d16bc0a` | feat(stt) Day 3: agent_interrupt + barge-in 整合 (Pattern 3) + 8 tests |
+| `2671552` | feat(stt) Day 4: UnityMicInput + HermesBridgeClient STT 事件 |
+| `a91862c` | fix(unity): UnityMicInput namespace SIRO → Siro |
+| `3ce159e` | feat(stt) Day 5: UnityTTSPlayer turn_id 過濾 + ChatInputUI 帶 turn_id |
+| `46054d1` | feat(stt) Day 6: STT end-to-end integration tests 15 個 |
+
+### 新增 Python 模組
+
+| 模組 | 行數 | 用途 |
+|---|---|---|
+| `bridge/vad/__init__.py` | 18 | VAD 公開 API |
+| `bridge/vad/vad_interface.py` | 35 | 抽象介面 |
+| `bridge/vad/silero.py` | 175 | Silero VAD v6 wrapper + VadEvent dataclass |
+| `bridge/stt/__init__.py` | 13 | STT 公開 API |
+| `bridge/stt/asr_interface.py` | 40 | 抽象介面 |
+| `bridge/stt/faster_whisper_asr.py` | 145 | faster-whisper backend |
+| `bridge/conversation.py` | 175 | Pattern 4 TurnManager + ConversationTask |
+
+### 新增 Unity 模組
+
+| 模組 | 用途 |
+|---|---|
+| `SiroUnity/Assets/Scripts/UnityMicInput.cs` | Always-on mic + 32ms chunk + visual ring + AEC hook |
+| `SiroUnity/Assets/Scripts/HermesBridgeClient.cs` 加 STT events | BridgeVadPause / BridgeVadResume / BridgeAgentInterrupt + SendMicChunkAsync + SendTextInputAsync |
+| `SiroUnity/Assets/Scripts/UnityTTSPlayer.cs` | SetCurrentTurnId 完整實作 + turn_id 過濾 + DuckVolume AEC |
+| `SiroUnity/Assets/Scripts/ChatInputUI.cs` | text_input 帶 turn_id、共用 UnityMicInput counter |
+
+### 4 個 O-LLVT pattern 採用 (MIT license)
+
+- **Pattern 1**: Silero VAD + state machine (v6 內建 VADIterator) → `bridge/vad/silero.py`
+- **Pattern 2**: TTSTaskManager sequence + clear() → Unity `HandleTtsAudio` turn_id 過濾
+- **Pattern 3**: Agent `handle_interrupt()` → bridge `agent_interrupt` event + LLM context 注入
+- **Pattern 4**: `asyncio.CancelledError` task cancel → `bridge/conversation.py` TurnManager
+
+### Test 成長
+
+- 從 399 → 464 passed(+ 65 tests)
+- 新增: 27 unit (VAD+STT) + 7 conversation + 8 barge-in + 8 STT pipeline + 15 STT e2e
+- 0 regression,1 skipped 不變
+
+### 設計文件
+
+- `docs/STT_INTEGRATION.md` (884 行) — 完整 Phase 2 STT 設計書
+- `LIVE2D_AI_AGENT_OS_PLAN.md` §9.5 — 收 O-LLVT 為 reference
+- `docs/ADR/0001-stt-tts-選型.md` — VAD 從 webrtc-vad 改 Silero (更新理由)
+
+### 已知限制 / Phase 2.5+ Polish
+
+- AEC 簡易版(volume ducking)— 戴耳機 0 問題、不戴耳機時 STT 收到 echo
+- Wake word「Hey Mao」未做 — Phase 2.5 加 `openwakeword` 或 Picovoice Porcupine
+- 真 echo cancellation without headphones — Phase 2.5 換 `com.unity.webrtc` 內建 AEC
+- Mic 裝置選擇 UI — Phase 3 UI 完善一起做
+
+---
+
 ## 2026-06-09 — v0.4+ 收尾、Phase 0-3 待辦清光 ✨
 
 **里程碑**：Phase 0-3 所有 plan 文件列出的代辦全部 ship。v1.0 之前的最後一波收尾。
