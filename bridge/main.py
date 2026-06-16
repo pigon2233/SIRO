@@ -2323,6 +2323,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     audio_bytes = base64.b64decode(audio_b64)
                 except Exception:
                     continue
+                # Day 8.6 debug log:確認 mic_chunk 真的進到 bridge
+                if not hasattr(websocket, "_mic_chunk_logged_first"):
+                    logger.info(
+                        f"🎙️ [stt] 第一個 mic_chunk: turn_id={turn_id} bytes={len(audio_bytes)} "
+                        f"client={websocket.client}"
+                    )
+                    websocket._mic_chunk_logged_first = True
                 # 餵 VAD,看有沒有 PAUSE/RESUME event
                 user_id = "default"  # TODO: 從 WS state 拿
                 personality = data.get("personality", "default")
