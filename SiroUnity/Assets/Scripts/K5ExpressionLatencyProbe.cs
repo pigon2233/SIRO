@@ -59,7 +59,11 @@ namespace Siro
         public bool stopOnFirstFrame = true;  // 預設備好就停、避免干擾其他測試
 
         private readonly List<float> _latencies = new List<float>();
+        // 測試結束旗標,給外部 stopOnFirstFrame 邏輯用(目前只在 OnDestroy 後讀)
+        // 還沒被其他 component 查詢、暫時 suppress warning
+#pragma warning disable CS0414  // 預留給 stopOnFirstFrame / OnDestroy 整合
         private bool _done = false;
+#pragma warning restore CS0414
 
         private void Start()
         {

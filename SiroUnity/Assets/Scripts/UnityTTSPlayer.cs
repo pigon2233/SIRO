@@ -61,7 +61,12 @@ namespace Siro
         private string _activePersonaId = "siro-default";
 
         // 防重複 TTS 自己打的訊息
+        // 設計:ChatInputUI 在 user 送出訊息時設 _lastUserMessage、HandleBridgeResponse
+        // 檢查 response 是否包含同樣訊息、是就不 TTS(避免 Mao 複頌自己講的話)
+        // 還沒接上 ChatInputUI、暫時 suppress warning(Phase 2 STT 一起做)
+#pragma warning disable CS0414  // 暫時未用、Phase 2 接 ChatInputUI
         private string _lastUserMessage = "";
+#pragma warning restore CS0414
 
         // Awake
         private void Awake()
