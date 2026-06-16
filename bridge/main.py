@@ -18,7 +18,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 # Windows console 預設 cp950 會解錯 hermes 的 UTF-8 輸出
 # 強制整個 process 用 UTF-8
@@ -348,6 +348,7 @@ async def _stream_tts_for_sentence(
     persona_id: str,
     tts_format: str = "wav",
     turn_id: int = 0,
+    last_heard_sink: Optional[Callable[[int, str], None]] = None,
 ) -> None:
     """背景 TTS 一個句子 → 推 WS `tts_audio` 給 Unity
 
@@ -359,12 +360,16 @@ async def _stream_tts_for_sentence(
         tts_format: 音檔格式(wav / mp3 / opus)
         turn_id: 對話 turn 編號(Phase 2 STT 用,Unity 用來過濾舊 turn 的 TTS chunk)
                  0 = 沒帶(legacy chat flow、Unity 忽略此欄位)
+        last_heard_sink: (turn_id, sentence) callback — Phase 2 STT 用來記住
+                        上一句 Mao 講過的話,等 user 打斷時可以丟給 LLM context。
 
     設計:
     - fire-and-forget:被 caller 用 asyncio.create_task 啟動
     - 失敗不 raise:只在 log 記,不要炸 LLM streaming 主流程
     - 推完 tts_audio 後 Unity 自己排隊播放
     - Phase 2 STT:turn_id > 0 時 payload 帶 turn_id、Unity 收到 turn_id ≠ current 會 drop
+    - Phase 2 STT barge-in:last_heard_sink 收到 callback 會被記住,等 user 打斷時
+                         推 agent_interrupt event + 注入 LLM context
     """
     if not sentence.strip():
         return
@@ -398,6 +403,12 @@ async def _stream_tts_for_sentence(
         if turn_id > 0:
             payload["turn_id"] = turn_id  # Phase 2 STT:Unity 端過濾
         await websocket.send_json(payload)
+        # Phase 2 STT barge-in:記下「上一句 Mao 講過的話」
+        if last_heard_sink is not None and turn_id > 0:
+            try:
+                last_heard_sink(turn_id, sentence)
+            except Exception as e:
+                logger.warning(f"[tts-stream] last_heard_sink 失敗: {e}")
         logger.debug(
             f"[tts-stream] 推 sentence #{sentence_index} turn={turn_id}: "
             f"len={len(sentence)} audio={len(audio_bytes)}B via {voice_cfg.provider}"
@@ -1526,7 +1537,11 @@ def _log_async_task_exception(task: asyncio.Task) -> None:
     logger.warning("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
 
 
-async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
+async def _process_ws_chat(
+    websocket: WebSocket,
+    data: dict,
+    last_heard_sink: Optional[Callable[[int, str], None]] = None,
+) -> None:
     """v1.2+ 抽出來 create_task 跑、不卡 receive loop。
 
     原本 chat 處理（5-30s LLM call）INLINE 在 /ws 的 while loop、
@@ -1541,6 +1556,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
     才發現 WS 已關 → send_json 噴 RuntimeError 是預期的、log warning 就好）。
 
     Phase 2 STT:turn_id > 0 時,所有 tts_audio chunk 帶 turn_id 給 Unity 過濾。
+    Day 3:last_heard_sink 記住「上一句 Mao 講過的話」,給 user 打斷時注入 LLM context。
     """
     message = data.get("message", "").strip()
     user_id = data.get("user_id", "default")
@@ -1749,6 +1765,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                                     websocket, sentence, sentence_idx_counter,
                                     persona_id=personality,
                                     turn_id=turn_id,
+                                    last_heard_sink=last_heard_sink,
                                 )
                             ))
                 elif event.type == "tool_use":
@@ -1788,6 +1805,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                         websocket, sentence, sentence_idx_counter,
                         persona_id=personality,
                         turn_id=turn_id,
+                        last_heard_sink=last_heard_sink,
                     )
                 ))
             if tts_tasks:
@@ -1914,6 +1932,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                                 websocket, sentence, sentence_idx_counter,
                                 persona_id=personality,
                                 turn_id=turn_id,
+                                last_heard_sink=last_heard_sink,
                             )
                         ))
         except Exception as e:
@@ -1947,6 +1966,7 @@ async def _process_ws_chat(websocket: WebSocket, data: dict) -> None:
                         websocket, sentence, sentence_idx_counter,
                         persona_id=personality,
                         turn_id=turn_id,
+                        last_heard_sink=last_heard_sink,
                     )
                 ))
             if tts_tasks:
@@ -2206,17 +2226,38 @@ async def websocket_endpoint(websocket: WebSocket):
     vad = SileroVAD()  # 預設 config
     # 用來 correlate 還沒送 STT 的 utterance(給 agent_interrupt last_heard 用)
     last_utterance_text: list[str] = []  # 用 list 是為了 mutable closure
+    # Phase 2 STT barge-in (Day 3):記住「上一句 Mao 講過的話」by turn_id
+    # 等 user 講話打斷時 → 推 agent_interrupt event 給 Unity、注入 LLM context
+    last_heard: dict[int, str] = {}  # turn_id → 最後一句 Mao 講的話
 
-    async def _run_conversation_turn(turn_id: int, text: str, user_id: str = "default", personality: str = "default") -> None:
+    def _last_heard_sink(turn_id: int, sentence: str) -> None:
+        """被 _stream_tts_for_sentence 呼叫、記住每個 turn 的最後一句話。"""
+        # 同一 turn 多句 → 只記最後一句(最 relevant)
+        last_heard[turn_id] = sentence
+
+    async def _run_conversation_turn(
+        turn_id: int,
+        text: str,
+        user_id: str = "default",
+        personality: str = "default",
+        interrupted_text: str = "",
+    ) -> None:
         """Pattern 4 包的 conversation run:用 _process_ws_chat 但帶 turn_id。
 
         Day 2 簡化版:直接 reuse 既有 chat 流程、加 turn_id 進去。
         TTS chunks 帶 turn_id、Unity 端可以過濾。
+
+        Day 3:支援 barge-in interrupted_text — 上一句 Mao 講過的話、
+        prepended 到 message 前面讓 LLM 知道 user 是打斷哪個話題。
         """
         # 模擬 chat message 格式
+        final_text = text
+        if interrupted_text:
+            # Pattern 3:注入 [interrupted by user] 給 LLM context
+            final_text = f"[User interrupted previous conversation about: '{interrupted_text}']\n\n{text}"
         data = {
             "type": "chat",
-            "message": text,
+            "message": final_text,
             "user_id": user_id,
             "personality": personality,
             "turn_id": turn_id,
@@ -2234,7 +2275,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "chat":
                 # v1.2+ 改：chat 處理整段 create_task 出去跑、不卡 receive loop
-                chat_task = asyncio.create_task(_process_ws_chat(websocket, data))
+                chat_task = asyncio.create_task(
+                    _process_ws_chat(websocket, data, last_heard_sink=_last_heard_sink)
+                )
                 chat_task.add_done_callback(_log_async_task_exception)
                 continue
 
@@ -2251,8 +2294,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 if turn_id <= 0:
                     await websocket.send_json({"type": "error", "detail": "text_input 需要 turn_id > 0"})
                     continue
+                # Day 3:user 打字也算打斷,推 agent_interrupt + 注入 interrupted_text
+                prev_turn_id = turn_manager.current_turn_id
+                prev_heard = last_heard.get(prev_turn_id, "") if prev_turn_id > 0 else ""
+                if prev_heard:
+                    await websocket.send_json({
+                        "type": "agent_interrupt",
+                        "turn_id": turn_id,
+                        "last_heard": prev_heard,
+                    })
                 async def run_text_input():
-                    await _run_conversation_turn(turn_id, text, user_id, personality)
+                    await _run_conversation_turn(
+                        turn_id, text, user_id, personality,
+                        interrupted_text=prev_heard,
+                    )
                 conv_task = await turn_manager.start_new_turn(turn_id, run_text_input)
                 conv_task.task.add_done_callback(_log_async_task_exception)
                 continue
@@ -2274,6 +2329,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 for event in vad.feed(audio_bytes, turn_id):
                     if event.type.value == "pause":
                         # Speech start → 推 vad_pause 給 Unity、準備 cancel 舊 turn
+                        # Day 3:同時推 agent_interrupt(Pattern 3 — LLM 知道被打斷)
+                        prev_turn_id = turn_manager.current_turn_id
+                        prev_heard = last_heard.get(prev_turn_id, "") if prev_turn_id > 0 else ""
+                        if prev_heard:
+                            await websocket.send_json({
+                                "type": "agent_interrupt",
+                                "turn_id": turn_id,
+                                "last_heard": prev_heard,
+                            })
                         await websocket.send_json({
                             "type": "vad_pause",
                             "turn_id": turn_id,
@@ -2294,6 +2358,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                         # 啟動 ASR + LLM 流程
                         captured_audio = event.audio or b""
+                        captured_interrupted = last_heard.get(turn_manager.current_turn_id, "")
                         async def run_stt_llm():
                             from .stt import FasterWhisperAsr
                             asr = FasterWhisperAsr()  # TODO:state cache
@@ -2311,8 +2376,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                 return
                             text = asr_result.text.strip()
                             last_utterance_text.append(text)
-                            # 跑 LLM + TTS(帶 turn_id)
-                            await _run_conversation_turn(turn_id, text, user_id, personality)
+                            # 跑 LLM + TTS(帶 turn_id + interrupted_text 注入 context)
+                            await _run_conversation_turn(
+                                turn_id, text, user_id, personality,
+                                interrupted_text=captured_interrupted,
+                            )
                         conv_task = await turn_manager.start_new_turn(turn_id, run_stt_llm)
                         conv_task.task.add_done_callback(_log_async_task_exception)
                 continue
