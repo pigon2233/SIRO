@@ -70,8 +70,8 @@ class SileroVADConfig(BaseModel):
     speech_pad_ms: int = Field(default=100, description="speech 邊界 pad ms")
 
     # SIRO 加的 dB gate(避免環境噪音誤觸)
-    # Day 8.8 fix:60 太高,正常對話 ~40-50 dB 過不了 → 降到 40 讓一般音量能觸發
-    db_threshold: int = Field(default=40, description="RMS dB 門檻、低於此不算 speech")
+    # Day 8.8 fix:60 太高 → 40 → 25(繼續調降,看 mic 實際音量到底多少)
+    db_threshold: int = Field(default=25, description="RMS dB 門檻、低於此不算 speech")
 
     # Pre-buffer:PAUSE 前保留 N 個 chunk(0.64s @ 32ms = 20 chunks)
     pre_buffer_chunks: int = Field(default=20, description="PAUSE 前保留的 chunk 數")
@@ -121,6 +121,8 @@ class SileroVAD:
         self._speech_buffer: list[bytes] = []
         self._speech_start_turn_id: Optional[int] = None
         self._is_speaking: bool = False
+        # Day 8.8 debug:印 mic 收到的實際 dB(每 32 chunk = 1 秒印一次、避免 spam)
+        self._db_log_counter: int = 0
 
     def feed(self, audio_chunk: bytes, turn_id: int) -> Iterator[VadEvent]:
         """吃一個 32ms 16-bit PCM mono chunk、yield 0~N 個 VadEvent。
@@ -139,6 +141,13 @@ class SileroVAD:
 
         # dB gate(避免環境噪音)
         rms_db = self._calculate_db(audio_chunk)
+        # Day 8.8 debug:每 32 chunk 印一次平均 dB(讓 user 知道 mic 實際音量)
+        self._db_log_counter += 1
+        if self._db_log_counter % 32 == 1 and not self._is_speaking:
+            gate_status = "通過" if rms_db >= self.config.db_threshold else f"擋下(<{self.config.db_threshold})"
+            logger.info(
+                f"🔊 [vad] mic dB={rms_db:.1f} (gate={self.config.db_threshold}dB) {gate_status}"
+            )
         if rms_db < self.config.db_threshold and not self._is_speaking:
             # 靜音 + 不在 speech 中 → 不送進 VAD、保留進 pre-buffer
             self._pre_buffer.append(audio_chunk)
