@@ -2384,7 +2384,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             if not captured_audio:
                                 return
                             audio_np = np.frombuffer(captured_audio, dtype=np.int16).astype(np.float32) / 32768.0
-                            asr_result = await asr.transcribe(audio_np, hint_language=personality[:2] if personality else None)
+                            asr_result = await asr.transcribe(audio_np, hint_language=os.environ.get("SIRO_STT_LANGUAGE") or "zh")
                             if not asr_result.text.strip():
                                 logger.info(f"[stt] ASR 沒結果 turn_id={turn_id} → 跳過")
                                 return
