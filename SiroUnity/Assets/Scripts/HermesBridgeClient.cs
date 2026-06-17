@@ -593,6 +593,14 @@ namespace Siro
             }
         }
 
+        /// <summary>截斷 log 用的 JSON 預覽(避免 base64 audio 把 console 灌爆)。</summary>
+        private static string TruncateForLog(string s, int maxLen = 200)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            if (s.Length <= maxLen) return s;
+            return s.Substring(0, maxLen) + $"... (truncated, total {s.Length} chars)";
+        }
+
         private System.Collections.IEnumerator ReconnectLoop()
         {
             while (_shouldRun && autoReconnect)
@@ -674,7 +682,11 @@ namespace Siro
 
         private async Task ReceiveLoopAsync()
         {
+            // Day 8.9 fix:WS frame 可能 > 4096 bytes(bridge 推的 tts_audio / vad_resume
+            // 帶 audio_base64 通常 10-200KB)。原本用 4096 buffer 直接讀就壞掉。
+            // 修法:用 List<byte> 累積跨 frame,直到 result.EndOfMessage 才 parse。
             var buffer = new byte[4096];
+            var messageBytes = new System.Collections.Generic.List<byte>();
 
             while (_shouldRun && _ws != null && _ws.State == WebSocketState.Open)
             {
@@ -691,10 +703,20 @@ namespace Siro
                         break;
                     }
 
-                    var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    if (verboseLogging) Debug.Log($"[HermesBridge] 收到: {json}");
+                    // 累積這次 frame 的 bytes
+                    messageBytes.AddRange(new System.ArraySegment<byte>(buffer, 0, result.Count));
 
-                    HandleMessage(json);
+                    if (result.EndOfMessage)
+                    {
+                        // Frame 完整收到才 parse JSON
+                        var json = Encoding.UTF8.GetString(messageBytes.ToArray());
+                        if (verboseLogging) Debug.Log(
+                            $"[HermesBridge] 收到 ({messageBytes.Count} bytes): {TruncateForLog(json)}"
+                        );
+
+                        HandleMessage(json);
+                        messageBytes.Clear();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
