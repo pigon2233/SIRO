@@ -176,7 +176,9 @@ class BridgeState:
         # 降低第一個音檔抵達 Unity 的時間(原 30s+ 變 8-10s)
         # 預設 false — 既有 Unity TTS 流程(收到 response 才 TTS)不破壞
         # 開:SIRO_TTS_STREAMING=true
-        self.use_tts_streaming = os.environ.get("SIRO_TTS_STREAMING", "false").lower() == "true"
+        # Day 8.11:預設改 True — Phase 2 STT 講話後 LLM 回應要 streaming 推 tts_audio
+        # 給 Unity 播,預設 False 會導致 STT 鏈壞掉(Mao 不講話)
+        self.use_tts_streaming = os.environ.get("SIRO_TTS_STREAMING", "true").lower() == "true"
 
 
 state = BridgeState()
