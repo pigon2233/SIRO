@@ -62,7 +62,7 @@ class SileroVADConfig(BaseModel):
     chunk_samples: int = Field(default=512, description="每塊 sample 數(16kHz 32ms = 512)")
 
     # Silero VADIterator 參數
-    prob_threshold: float = Field(default=0.4, description="speech probability 門檻")
+    prob_threshold: float = Field(default=0.3, description="speech probability 門檻")
     min_silence_duration_ms: int = Field(
         default=700,
         description="靜音超過此 ms 才算 utterance 結束(24 chunks @ 32ms ≈ 768ms)",
@@ -70,7 +70,8 @@ class SileroVADConfig(BaseModel):
     speech_pad_ms: int = Field(default=100, description="speech 邊界 pad ms")
 
     # SIRO 加的 dB gate(避免環境噪音誤觸)
-    db_threshold: int = Field(default=60, description="RMS dB 門檻、低於此不算 speech")
+    # Day 8.8 fix:60 太高,正常對話 ~40-50 dB 過不了 → 降到 40 讓一般音量能觸發
+    db_threshold: int = Field(default=40, description="RMS dB 門檻、低於此不算 speech")
 
     # Pre-buffer:PAUSE 前保留 N 個 chunk(0.64s @ 32ms = 20 chunks)
     pre_buffer_chunks: int = Field(default=20, description="PAUSE 前保留的 chunk 數")
