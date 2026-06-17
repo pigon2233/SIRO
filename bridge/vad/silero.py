@@ -70,8 +70,11 @@ class SileroVADConfig(BaseModel):
     speech_pad_ms: int = Field(default=100, description="speech 邊界 pad ms")
 
     # SIRO 加的 dB gate(避免環境噪音誤觸)
-    # Day 8.8 fix:60 太高 → 40 → 25(繼續調降,看 mic 實際音量到底多少)
-    db_threshold: int = Field(default=25, description="RMS dB 門檻、低於此不算 speech")
+    # Day 8.8b:mic 訊號很弱(講話 -39 dB)、先 gain 30 倍再算 dB
+    # gain 後噪音 ~-65 dB(過不了 -10 gate)、講話 ~-10 dB(過得了)
+    db_threshold: int = Field(default=-10, description="RMS dB 門檻(套用 gain 後)、低於此不算 speech")
+    # mic gain amplifier(解決 mic 設備音量太弱問題)
+    mic_gain: float = Field(default=30.0, description="mic 訊號 gain 倍率(clip 到 int16 範圍)")
 
     # Pre-buffer:PAUSE 前保留 N 個 chunk(0.64s @ 32ms = 20 chunks)
     pre_buffer_chunks: int = Field(default=20, description="PAUSE 前保留的 chunk 數")
@@ -139,14 +142,19 @@ class SileroVAD:
             # Partial chunk(可能 Unity 第一次 buffer 還沒滿)— 忽略、累積到下次
             return
 
-        # dB gate(避免環境噪音)
+        # Day 8.8b:套用 mic gain amplifier(解決 mic 設備音量太弱)
+        # gain 後 int16 範圍 clip 掉,不會 overflow 到 Silero
+        if self.config.mic_gain != 1.0:
+            audio_chunk = self._apply_gain(audio_chunk, self.config.mic_gain)
+
+        # dB gate(避免環境噪音,用 gain 後的 dB)
         rms_db = self._calculate_db(audio_chunk)
         # Day 8.8 debug:每 32 chunk 印一次平均 dB(讓 user 知道 mic 實際音量)
         self._db_log_counter += 1
         if self._db_log_counter % 32 == 1 and not self._is_speaking:
             gate_status = "通過" if rms_db >= self.config.db_threshold else f"擋下(<{self.config.db_threshold})"
             logger.info(
-                f"🔊 [vad] mic dB={rms_db:.1f} (gate={self.config.db_threshold}dB) {gate_status}"
+                f"🔊 [vad] mic dB={rms_db:.1f} (gate={self.config.db_threshold}dB, gain={self.config.mic_gain}) {gate_status}"
             )
         if rms_db < self.config.db_threshold and not self._is_speaking:
             # 靜音 + 不在 speech 中 → 不送進 VAD、保留進 pre-buffer
@@ -213,6 +221,13 @@ class SileroVAD:
         if rms <= 0:
             return -math.inf
         return 20.0 * math.log10(rms)
+
+    @staticmethod
+    def _apply_gain(audio_chunk: bytes, gain: float) -> bytes:
+        """套用 gain 到 int16 PCM chunk(clip 避免 overflow)。"""
+        arr = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.int32)
+        arr = np.clip(arr * gain, -32768, 32767).astype(np.int16)
+        return arr.tobytes()
 
     def _estimate_duration_ms(self, num_chunks: int) -> int:
         """從 chunk 數推算 duration ms。"""
