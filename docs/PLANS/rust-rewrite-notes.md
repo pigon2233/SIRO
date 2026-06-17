@@ -144,7 +144,7 @@ Phase 3 不等於「改寫 bridge」 — Phase 3 是「在 Python bridge 旁邊�
 ## 相關文件
 
 - [STRATEGIC_NOTES.md Q1](STRATEGIC_NOTES.md#q1-rust-改寫-bridge) — 原始決策
-- [PLAN_REVISION_v2.1.md #2](PLAN_REVISION_v2.1.md) — Rust 邊界
+- [PLAN_REVISION_v2.1.md #2](../history/plan-revision-v2.1.md) — Rust 邊界
 - [ARCHITECTURE.md §1.1](ARCHITECTURE.md) — 4 層架構
 - [LIVE2D_AI_AGENT_OS_PLAN.md §2.1](LIVE2D_AI_AGENT_OS_PLAN.md) — 為什麼 Python + Rust
 - [LIVE2D_AI_AGENT_OS_PLAN.md §8.5](LIVE2D_AI_AGENT_OS_PLAN.md) — LLM 廠商風險管理（不抽 protocol 抽象的同樣精神）

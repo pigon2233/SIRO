@@ -2,7 +2,7 @@
 
 > **目標版本**：v2.0（2027 1-3 月規劃）
 > **對應 PLAN 段**：[LIVE2D_AI_AGENT_OS_PLAN.md §v2.0](../../LIVE2D_AI_AGENT_OS_PLAN.md)
-> **對應 GAPS**：[GAPS.md #4 離線、#5 災難恢復](../../docs/GAPS.md)
+> **對應 GAPS**：[GAPS.md #4 離線、#5 災難恢復](../../docs/strategic-gaps.md)
 > **狀態**：v0.x 已 ship、v2.0 開工前 design doc
 
 ## 為什麼 v2.0 要做
@@ -255,7 +255,7 @@ async def _worker_loop():
   - 量 bridge latency (P50 / P95 / P99)
   - 量 SQLite 檔案大小成長率
 
-### 災難恢復（[GAPS #5](../../docs/GAPS.md) 對齊）
+### 災難恢復（[GAPS #5](../../docs/strategic-gaps.md) 對齊）
 - L1 損壞（SQLite 檔案 corrupt）→ 自動從備份還原（每 10 分鐘 snapshot）
 - L2 bridge crash → recovery 流程驗證
 - L3 SSD 壞 → image restore + SQLite 從備份還原
@@ -302,8 +302,8 @@ v2.0 persistence 是 K9 啟動的**基礎**：
 ## 相關文件
 
 - [LIVE2D_AI_AGENT_OS_PLAN.md §v2.0](../../LIVE2D_AI_AGENT_OS_PLAN.md) — 原始規劃
-- [AGENT_OS.md](../../docs/AGENT_OS.md) — AgentOS 架構（要被 SQLite 取代的部分）
-- [GAPS.md #4 #5](../../docs/GAPS.md) — 對應的 gap
+- [AGENT_OS.md](../../docs/../reference/agent-os.md) — AgentOS 架構（要被 SQLite 取代的部分）
+- [GAPS.md #4 #5](../../docs/strategic-gaps.md) — 對應的 gap
 - [docs/PLANS/agent-computer-control.md](agent-computer-control.md) — v1.5+ 已經用了 SQLite 做 memory（v2.0 整合進去）
 - [CHANGELOG.md 2026-06-08 v1.5+](../../docs/CHANGELOG.md) — memory SQLite 既有實作
 

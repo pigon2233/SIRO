@@ -4,7 +4,7 @@
 > **動機**：把角色性格、表情、聲音從 code 抽出來，做到「資料與程式碼分離」。
 > 換角色 = 換一個 YAML 檔，不用改任何 .py / .cs。
 >
-> **問題出處**：[docs/GAPS.md](GAPS.md) #3
+> **問題出處**：[docs/GAPS.md](PLANS/strategic-gaps.md) #3
 
 ---
 
@@ -202,6 +202,6 @@ voice:
 
 ## 相關文件
 
-- [docs/GAPS.md](GAPS.md) #3 — 為什麼要 Persona
+- [docs/GAPS.md](PLANS/strategic-gaps.md) #3 — 為什麼要 Persona
 - [bridge/personas/](../bridge/personas/) — 範例 Persona
 - [bridge/prompts.py](../bridge/prompts.py) — 載入 Persona 的程式碼

@@ -169,14 +169,14 @@ PLAN_REVIEW_v0.3.md（2026-06-04 修訂）已對齊 A 案，把本檔 Q2 結論�
 | 本檔 | 對應文件 | 對應章節 |
 |------|----------|----------|
 | Q1 Rust 改寫 | [ARCHITECTURE.md](ARCHITECTURE.md) | §1.1 4 層架構（Layer 3 Rust / Layer 4 Linux）|
-| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #2 Rust 邊界沒講清楚 🟠 |
-| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #11 「OS」定義模糊 🟡 |
-| Q2 Streaming | [DECISIONS.md](DECISIONS.md) | 決策 #001「為什麼用 Hermes Agent」v0.2 觀察段 |
-| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #1 Streaming 整個漏掉 🔴 |
-| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #5 雲端 LLM 廠商鎖定 🟠 |
-| Q2 Streaming | [PLAN_REVISION_v2.1.md](PLAN_REVISION_v2.1.md) | #4 TTFT / KPI 沒量化 🟠 |
+| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](plan-revision-v2.1.md) | #2 Rust 邊界沒講清楚 🟠 |
+| Q1 Rust 改寫 | [PLAN_REVISION_v2.1.md](plan-revision-v2.1.md) | #11 「OS」定義模糊 🟡 |
+| Q2 Streaming | [DECISIONS.md](decisions.md) | 決策 #001「為什麼用 Hermes Agent」v0.2 觀察段 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](plan-revision-v2.1.md) | #1 Streaming 整個漏掉 🔴 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](plan-revision-v2.1.md) | #5 雲端 LLM 廠商鎖定 🟠 |
+| Q2 Streaming | [PLAN_REVISION_v2.1.md](plan-revision-v2.1.md) | #4 TTFT / KPI 沒量化 🟠 |
 | v0.3 進度 | [STATUS.md](STATUS.md) | 版本演進段（v0.2 → v0.3）|
-| v0.3 進度 | [AGENT_OS.md](AGENT_OS.md) | 範圍演進段（v0.3 接到 /chat）|
+| v0.3 進度 | [AGENT_OS.md](../reference/agent-os.md) | 範圍演進段（v0.3 接到 /chat）|
 | v0.3 進度 | [ARCHITECTURE.md](ARCHITECTURE.md) | v0.3 範圍對照表 |
 | v0.3 進度 | [SETUP.md](SETUP.md) | §9 KPI 驗收（K1 K2 K4 K5 K7 K8 K10）|
 

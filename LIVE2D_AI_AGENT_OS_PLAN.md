@@ -14,13 +14,19 @@
 > - ⏳ Phase 4 / 5 / 6 為規劃
 > - **v0.3.1 進度**：選 Q2 選項 B（hermes_client streaming shim + Unity 端 incremental render 都完成）
 
-> **重要 cross-ref**：
+> **文件導覽**(2026-06-17 docs/ 重組後):
 >
-> - 階段細節：見各 Phase section（下方）
-> - **v0.x 進度子版本**：見本檔「§5.5 v0.x 進度子表」（v0.2 / v0.3 / v0.3.1 詳細狀態）
-> - 修訂記錄：`docs/PLAN_REVIEW_v0.3.md` + `docs/PLAN_REVISION_v2.1.md`（v0.3 期間的修訂歷史）
-> - KPI 驗收：`docs/SETUP.md` §9（K1-K7 對應 v0.3 範圍）
-> - 戰略決策：`docs/STRATEGIC_NOTES.md`（Q1 Rust、Q2 streaming + cross-reference 段）
+> - **完整 index**:[`docs/INDEX.md`](docs/INDEX.md) — 12 頂層 + 5 子目錄的導覽,**從這裡開始**
+> - **本檔細節**:見下方各 Phase section
+> - **v0.x 進度子版本**:見本檔「§5.5 v0.x 進度子表」(v0.2 / v0.3 / v0.3.1 詳細狀態)
+> - **修訂歷史**:`docs/history/plan-review-v0.3.md` + `docs/history/plan-revision-v2.1.md`(v0.3 期間)
+> - **KPI 驗收**:`docs/SETUP.md` §9(K1-K7 對應 v0.3 範圍)
+> - **戰略決策**:`docs/history/strategic-notes.md`(Q1 Rust、Q2 streaming)
+> - **架構細節**:`docs/ARCHITECTURE.md`(4 層架構)、[`docs/reference/agent-os.md`](docs/reference/agent-os.md)(Agent OS 深度)
+> - **當前 roadmap**:`docs/PLANS/open-llm-vtuber.md`(19-feature 補完計畫,P0/P1/P2)、`docs/PLANS/strategic-gaps.md`(10 個戰略 gap)
+> - **整合設計**:`docs/integration/stt.md` / `tts.md` / `tts-f5.md` / `streaming.md` / `persona-guide.md`
+> - **設計決策(新格式)**:`docs/ADR/`
+> - **設計決策(legacy)**:`docs/history/decisions.md`
 
 ---
 
@@ -92,7 +98,7 @@
 
 ### 1.4 範圍邊界
 
-> 為什麼寫這段：防止 scope creep、未來 phase 開工前先看這段對齊「做 / 不做」。詳細來源見 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #14。
+> 為什麼寫這段：防止 scope creep、未來 phase 開工前先看這段對齊「做 / 不做」。詳細來源見 [docs/PLAN_REVISION_v2.1.md](docs/history/plan-revision-v2.1.md) #14。
 
 **v1 試用期（2026 12 月 v1 發布前）不做**：
 
@@ -442,7 +448,7 @@
 
 ### Phase 1.5: GAPS 立刻補強 ✅ 完成（2026-06-03 runtime 驗收過）
 
-**目標**：填補 [docs/GAPS.md](docs/GAPS.md) 中「不做會卡 Phase 2-3」的 5 項缺口。
+**目標**：填補 [docs/GAPS.md](docs/PLANS/strategic-gaps.md) 中「不做會卡 Phase 2-3」的 5 項缺口。
 
 **動機**：
 Phase 1 把「能跟 Mao 文字對話」這件事跑通了，但發現幾個**架構性缺口**會影響後續所有 Phase：
@@ -503,7 +509,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：完善 Live2D 互動體驗、加上視覺效果、把 bridge 升級成「後台作業系統」
 
-**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+**GAPS 對應** ([docs/GAPS.md](docs/PLANS/strategic-gaps.md))：
 
 - **#10 i18n**：UI 字串抽到 `i18n/zh-TW.json`，為未來換 Persona 換語言鋪路
 - **#9 降級路徑（細化）**：Phase 1.5 只做了「連線中」提示，Phase 2 要做更細：subprocess 卡住 vs 完全斷線 vs LLM timeout 的不同 UI 表現
@@ -583,7 +589,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 - 2026-06-08 audit：K8 16ms PASS、K2 4.22s 本地 / 30.8s 雲端（< 2s 需 GPU）、memory 23.37MB、cargo clippy 0 warning
 - Phase 1-3 完整 audit 通過（259 tests + 10 Rust tests = 273 tests、0 hardcoded secrets、0 TODO/FIXME）
 
-**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+**GAPS 對應** ([docs/GAPS.md](docs/PLANS/strategic-gaps.md))：
 
 - **#2 多模態（音訊基礎）**：Rust 端 audio pipeline 草案（cpal 採音 → STT pipe → bridge）。STT/TTS 模型選型（whisper.cpp / piper）。實際語音整合留 Phase 5（要硬體）
 - **#4 離線降級（細化）**：siro-runtime 完整 health check pipeline — bridge 死 → siro-supervisor 偵測 → 重啟 → Unity 看到「siro reloading」
@@ -640,7 +646,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：把現在的 Windows 開發機改成 Ubuntu Server 24.04 LTS 雙系統（或全替換）
 
-**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+**GAPS 對應** ([docs/GAPS.md](docs/PLANS/strategic-gaps.md))：
 
 - **#1 隱私（加密實作）**：LUKS 全碟加密（安裝時開）+ age 應用層加密敏感資料 + SQLite 持久對話歷史（加密儲存）+「忘記我」按鈕
 - **#10 i18n（系統層）**：LANG / LC_ALL 統一設 zh_TW.UTF-8，systemd journal 多語環境變數，IME 設定
@@ -698,7 +704,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：把系統打包到實際的硬體配置上
 
-**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+**GAPS 對應** ([docs/GAPS.md](docs/PLANS/strategic-gaps.md))：
 
 - **#2 多模態（語音實裝）**：Phase 3 選好的 STT/TTS 模型在真實 mic/speaker 上整合 + 延遲量測
 - **#1 隱私（硬體層）**：mic/camera 實體指示燈（系統用 ↔ LED 亮）+ 麥克風硬體開關
@@ -753,7 +759,7 @@ Phase 2 是視覺 polish（待機動作、平滑過渡）— 但 polish 之前�
 
 **目標**：可以快速複製到 2-10 台裝置、支援 OTA 更新
 
-**GAPS 對應** ([docs/GAPS.md](docs/GAPS.md))：
+**GAPS 對應** ([docs/GAPS.md](docs/PLANS/strategic-gaps.md))：
 
 - **#5 災難恢復**：4 級災難（角色記憶損毀 / 系統當機 / SSD 壞 / 整台丟）的恢復 SOP + 備份格式（角色 + 記憶 + 設定 + 對話歷史 + age 加密）
 - **#6 OTA UX**：升級狀態 state machine、角色升級前主動告知、失敗自動回滾、避開使用者常用時段
@@ -1044,7 +1050,7 @@ escape_password = "..."
 
 ### 8.5 LLM 廠商風險管理
 
-> 對應 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #5 + [docs/STRATEGIC_NOTES.md Q2](docs/STRATEGIC_NOTES.md#q2-streaming-回應) 結論。
+> 對應 [docs/PLAN_REVISION_v2.1.md](docs/history/plan-revision-v2.1.md) #5 + [docs/STRATEGIC_NOTES.md Q2](docs/STRATEGIC_NOTES.md#q2-streaming-回應) 結論。
 
 **問題**：
 
@@ -1079,9 +1085,9 @@ v0.4 採 STRATEGIC_NOTES Q2 結論（**不繞過 hermes** 但 proxy 限制 → �
 
 **對應文件**：
 
-- [STRATEGIC_NOTES.md Q2](docs/STRATEGIC_NOTES.md#q2-streaming-回應) — 完整決策（為什麼不繞過 hermes）
-- [DECISIONS.md #001](docs/DECISIONS.md#決策-001--為什麼用-hermes-agent-當核心大腦) — 為什麼用 hermes
-- [DECISIONS.md #001 修正](docs/DECISIONS.md) §修正 — v0.2 觀察（hermes 缺 streaming）
+- [STRATEGIC_NOTES.md Q2](docs/history/strategic-notes.md#q2-streaming-回應) — 完整決策（為什麼不繞過 hermes）
+- [DECISIONS.md #001](docs/history/decisions.md#決策-001--為什麼用-hermes-agent-當核心大腦) — 為什麼用 hermes
+- [DECISIONS.md #001 修正](docs/history/decisions.md) §修正 — v0.2 觀察（hermes 缺 streaming）
 
 ---
 
@@ -1089,7 +1095,7 @@ v0.4 採 STRATEGIC_NOTES Q2 結論（**不繞過 hermes** 但 proxy 限制 → �
 
 Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**（單機單 Mao 階段的細部擴充 + 持久化層級）。
 
-**Single source of truth**：[docs/AGENT_OS.md](docs/AGENT_OS.md) 的「v1+ Roadmap」段（含 v1.2 SendTask + OnClick 完整規格 — WS message 格式、C# API、task 種類、驗收條件、實作順序）。
+**Single source of truth**：[docs/AGENT_OS.md](docs/reference/agent-os.md) 的「v1+ Roadmap」段（含 v1.2 SendTask + OnClick 完整規格 — WS message 格式、C# API、task 種類、驗收條件、實作順序）。
 
 各 sub-version 簡述：
 
@@ -1103,7 +1109,7 @@ Phase 2 涵蓋 v0.2 → v0.4+ → **v1.0 → v1.1 → v1.2 → v1.5 → v2.0**�
 | **v1.5+**   | **Computer Control（15 個 tool + sandbox + confirmation + 長期記憶）** | ✅ 1 天（2026-06-08 完成）      | **新願景：「給 SIRO 一台空電腦養人格」**                              |
 | **v2.0**    | **任務持久化 + bridge 重啟可恢復 + multi-process 部署就緒** | 2-3 週                         | **K9（5歲到80歲會用）正式開始驗證**、GAPS #4（離線）、#5（災難恢復） |
 
-**v2.0 重點**（補上 [AGENT_OS.md v1+ Roadmap](docs/AGENT_OS.md) 漏段）：
+**v2.0 重點**（補上 [AGENT_OS.md v1+ Roadmap](docs/reference/agent-os.md) 漏段）：
 
 - **任務持久化**：bridge 改用 SQLite 取代 v0.x 的 in-memory `state.sessions`（對話歷史 + task queue + worker state 全部落盤）
 - **bridge 重啟可恢復**：bridge 重啟時 in-flight task 從 SQLite 撈回來繼續跑、不丟失
@@ -1477,7 +1483,7 @@ AI 拿到任何一個 Phase 的 spec，可以獨立完成其中的子任務。
 
 ## 11. 使用者驗證
 
-> 對應 [docs/PLAN_REVISION_v2.1.md](docs/PLAN_REVISION_v2.1.md) #12 + KPI **K9**（5歲到80歲會用 — v2 驗證，但 v0.4 就要開始累積資料）。
+> 對應 [docs/PLAN_REVISION_v2.1.md](docs/history/plan-revision-v2.1.md) #12 + KPI **K9**（5歲到80歲會用 — v2 驗證，但 v0.4 就要開始累積資料）。
 
 **為什麼要這章**：
 
@@ -1541,8 +1547,8 @@ SIRO 的終極測試是「**爸媽用 5 分鐘就會跟它講話**」，不是�
 
 ### 11.7 交叉參考
 
-- [docs/GAPS.md #9 降級路徑](docs/GAPS.md#9-降級路徑失敗展示-) — 「使用者會看到什麼」對齊 user testing 觀察
-- [docs/STRATEGIC_NOTES.md Q1](docs/STRATEGIC_NOTES.md#q1-rust-改寫-bridge) — 為什麼 K9 驗證前不急著 Rust 改寫（v0.x Python 對使用者無感）
+- [docs/GAPS.md #9 降級路徑](docs/PLANS/strategic-gaps.md#9-降級路徑失敗展示-) — 「使用者會看到什麼」對齊 user testing 觀察
+- [docs/STRATEGIC_NOTES.md Q1](docs/history/strategic-notes.md#q1-rust-改寫-bridge) — 為什麼 K9 驗證前不急著 Rust 改寫（v0.x Python 對使用者無感）
 
 ---
 

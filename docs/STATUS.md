@@ -34,16 +34,16 @@ SIRO 是「**Mao Live2D 角色 + bridge 後台作業系統 + Rust 系統層**」
 
 ### 計畫 / 架構
 - [`LIVE2D_AI_AGENT_OS_PLAN.md`](../LIVE2D_AI_AGENT_OS_PLAN.md) — 原始完整計畫書（v2.0）
-- [`docs/AGENT_OS.md`](AGENT_OS.md) — **v0.3 後台作業系統架構（最近更新）**
+- [`docs/AGENT_OS.md`](reference/agent-os.md) — **v0.3 後台作業系統架構（最近更新）**
 - [`docs/PERSONA.md`](PERSONA.md) — Persona YAML schema
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — 系統架構
-- [`docs/GAPS.md`](GAPS.md) — 10 個 GAPS 缺口
-- [`docs/DECISIONS.md`](DECISIONS.md) — 重大決策紀錄
+- [`docs/GAPS.md`](PLANS/strategic-gaps.md) — 10 個 GAPS 缺口
+- [`docs/DECISIONS.md`](history/decisions.md) — 重大決策紀錄
 
 ### 設定 / 操作
 - [`SiroUnity/SETUP_NOTES.md`](../SiroUnity/SETUP_NOTES.md) — Unity 13 個坑的踩雷紀錄
 - [`docs/SETUP.md`](SETUP.md) — 整體 setup
-- [`docs/SETUP_PERSONA.md`](SETUP_PERSONA.md) — Persona 切換場景接線
+- [`docs/SETUP_PERSONA.md`](integration/persona-guide.md) — Persona 切換場景接線
 - [`docs/API.md`](API.md) — bridge API 規格
 - [`docs/TESTING.md`](TESTING.md) — 測試 SOP
 - [`docs/SECURITY.md`](SECURITY.md) — 隱私現況 + 加密 roadmap

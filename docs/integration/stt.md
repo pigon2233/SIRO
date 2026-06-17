@@ -2,7 +2,7 @@
 
 > 給未來自己 / 別人看「為什麼 STT 這樣設計、怎麼用、怎麼擴充」
 > 對應 plan: [LIVE2D_AI_AGENT_OS_PLAN.md §5.5 v0.x + §9.5 Open Source 參考](../LIVE2D_AI_AGENT_OS_PLAN.md)
-> 對應核心體驗 plan: [CORE_EXPERIENCE_V1.md §Phase 2 STT](CORE_EXPERIENCE_V1.md)
+> 對應核心體驗 plan: [CORE_EXPERIENCE_V1.md §Phase 2 STT](../PLANS/core-experience-v1.md)
 > 對應原 ADR (待修): [ADR/0001-stt-tts-選型.md](ADR/0001-stt-tts-選型.md) — VAD 從 webrtc-vad 改 Silero
 
 ---
@@ -911,9 +911,9 @@ print(f"bridge memory: {mem_mb:.1f} MB")
 
 ### SIRO 內部文件
 - [LIVE2D_AI_AGENT_OS_PLAN.md §9.5 關鍵 Open Source 參考](../LIVE2D_AI_AGENT_OS_PLAN.md#95-關鍵-open-source-參考)
-- [CORE_EXPERIENCE_V1.md §Phase 2 STT](CORE_EXPERIENCE_V1.md) — Core Experience 整體 v1.0 規劃
-- [TTS_INTEGRATION.md](TTS_INTEGRATION.md) — TTS 對稱設計(已完成)
-- [TTS_F5_INTEGRATION.md](TTS_F5_INTEGRATION.md) — F5-TTS 整合細節
+- [CORE_EXPERIENCE_V1.md §Phase 2 STT](../PLANS/core-experience-v1.md) — Core Experience 整體 v1.0 規劃
+- [TTS_INTEGRATION.md](tts.md) — TTS 對稱設計(已完成)
+- [TTS_F5_INTEGRATION.md](tts-f5.md) — F5-TTS 整合細節
 - [ADR/0001-stt-tts-選型.md](ADR/0001-stt-tts-選型.md) — 待修(VAD 改 Silero)
 
 ### 外部 library

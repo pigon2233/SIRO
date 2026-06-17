@@ -1,6 +1,6 @@
 # GAPS #9 降級路徑細化 — 從「bridge 死掉 Mao 變 thinking」到「per-subsystem 精確 UI」
 
-> **對應 GAPS**：[GAPS.md #9 降級路徑（失敗展示）](../../docs/GAPS.md)
+> **對應 GAPS**：[GAPS.md #9 降級路徑（失敗展示）](../../docs/strategic-gaps.md)
 > **對應 ADR**：[ADR 0002-subsystem-failure-對話對應.md](../ADR/0002-subsystem-failure-對話對應.md)
 > **目標版本**：v0.5+（在 v0.3.0 之上細化）
 
@@ -130,7 +130,7 @@ v2.0 啟動 user testing 時，特別驗證：
 
 ## 相關文件
 
-- [GAPS.md #9](../../docs/GAPS.md) — 原始 gap 描述
+- [GAPS.md #9](../../docs/strategic-gaps.md) — 原始 gap 描述
 - [ADR 0002](../ADR/0002-subsystem-failure-對話對應.md) — 12 個 subsystem × Unity UX × persona dialog 對應表
 - [LIVE2D_AI_AGENT_OS_PLAN.md §8 風險登記](LIVE2D_AI_AGENT_OS_PLAN.md) — R3 (降級路徑)
 - [LIVE2D_AI_AGENT_OS_PLAN.md §11 使用者驗證](LIVE2D_AI_AGENT_OS_PLAN.md) — K9 對齊

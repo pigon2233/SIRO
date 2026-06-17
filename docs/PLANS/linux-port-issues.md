@@ -388,7 +388,7 @@ public string serverUrl = "ws://127.0.0.1:8001/ws";
 
 - [LIVE2D_AI_AGENT_OS_PLAN.md §Phase 4](../../LIVE2D_AI_AGENT_OS_PLAN.md) — Ubuntu Server 客製化
 - [docs/PLANS/agent-computer-control.md](agent-computer-control.md) — v1.5+ tools 設計
-- [docs/GAPS.md #1 隱私](../../docs/GAPS.md) — LUKS / age 加密
+- [docs/GAPS.md #1 隱私](../../docs/strategic-gaps.md) — LUKS / age 加密
 - [scripts/start_bridge.sh](../../scripts/start_bridge.sh) — Linux shell script
 - [scripts/start_bridge.ps1](../../scripts/start_bridge.ps1) — Windows PowerShell
 

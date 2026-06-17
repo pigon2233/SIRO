@@ -118,9 +118,9 @@ KPI 目標是**指引**、不是**鐵律**。
 
 - [LIVE2D_AI_AGENT_OS_PLAN.md §KPI K2](../../LIVE2D_AI_AGENT_OS_PLAN.md) — 原始目標
 - [CHANGELOG.md 2026-06-08 F1/F2](../../docs/CHANGELOG.md) — K2 量化結果
-- [STREAMING_NOTES.md](../../docs/STREAMING_NOTES.md) — Streaming 決策（不繞過 hermes）
+- [STREAMING_NOTES.md](../../docs/../integration/streaming.md) — Streaming 決策（不繞過 hermes）
 - [scripts/perf/measure_k2.py](../../scripts/perf/measure_k2.py) — 量測腳本
-- [STRATEGIC_NOTES.md Q2](../../docs/STRATEGIC_NOTES.md) — streaming 戰略決策
+- [STRATEGIC_NOTES.md Q2](../../docs/../history/strategic-notes.md) — streaming 戰略決策
 
 ---
 

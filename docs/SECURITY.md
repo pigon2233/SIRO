@@ -10,7 +10,7 @@
 
 ## 0. v0 現況（Phase 1 完成）
 
-> **問題出處**：[docs/GAPS.md](GAPS.md) #1（致命優先級）
+> **問題出處**：[docs/GAPS.md](PLANS/strategic-gaps.md) #1（致命優先級）
 > 這節回答：**現在**資料存哪、誰能讀、重啟後留多少。
 
 ### 0.1 TL;DR

@@ -133,8 +133,8 @@
 ## 相關文件
 
 - [STRATEGIC_NOTES.md Q2](STRATEGIC_NOTES.md#q2-streaming-回應) — 原始決策過程
-- [PLAN_REVISION_v2.1.md #1](PLAN_REVISION_v2.1.md) — Streaming 整個漏掉
-- [PLAN_REVISION_v2.1.md #5](PLAN_REVISION_v2.1.md) — 雲端 LLM 廠商鎖定
+- [PLAN_REVISION_v2.1.md #1](../history/plan-revision-v2.1.md) — Streaming 整個漏掉
+- [PLAN_REVISION_v2.1.md #5](../history/plan-revision-v2.1.md) — 雲端 LLM 廠商鎖定
 - [LIVE2D_AI_AGENT_OS_PLAN.md §8.5](LIVE2D_AI_AGENT_OS_PLAN.md) — LLM 廠商風險管理
 - [CHANGELOG.md 2026-06-08 F1/F2 段](CHANGELOG.md) — K2 量化結果
 - [bridge/minimax_streaming_client.py](../bridge/minimax_streaming_client.py) — 實作

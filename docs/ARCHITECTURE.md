@@ -4,7 +4,7 @@
 > **終極願景 v2.0** — 4 層架構：Linux + Rust + Python + Unity
 > 完整計畫見 [../LIVE2D_AI_AGENT_OS_PLAN.md](../LIVE2D_AI_AGENT_OS_PLAN.md)
 > 介面契約見 [API.md](API.md)
-> 設計決策見 [DECISIONS.md](DECISIONS.md)
+> 設計決策見 [DECISIONS.md](history/decisions.md)
 
 ### v0.3 範圍對照
 
